@@ -34,9 +34,11 @@ func (qp *Queue[T]) Enqueue(value T) {
 	if qp.head == nil {
 		qp.head = n
 	} else if qp.tail == nil {
+		qp.head.next = n
 		qp.tail = n
 	} else {
 		qp.tail.next = n
+		qp.tail = n
 	}
 	qp.size++
 }
