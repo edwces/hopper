@@ -11,14 +11,15 @@ import (
 )
 
 func Crawl(urls, allowedDomains, disallowedDomains []string) []html.Node {
-	frontier := urls
-	// TODO should store pages in some database
+	// TODO: should be a multithreaded queue
+	frontier := NewQueue(urls...)
+	// TODO: should store pages in some database
 	storage := []html.Node{}
 	seenUrls := []string{urls[0]}
 
 	for {
 		// Fetch/Download data
-		urlProccessed := frontier[0]
+		urlProccessed := frontier.Dequeue()
 		// TODO: download robots.txt for domain if not cached
 
 		resp, err := http.Get(urlProccessed)
@@ -71,9 +72,8 @@ func Crawl(urls, allowedDomains, disallowedDomains []string) []html.Node {
 		}
 		f(doc)
 
-		// TODO: filter URL
+		// filter URL
 		filteredUrls := filterUrls(urlsToAppend, allowedDomains, disallowedDomains)
-		// TODO: Refactor to add contains func to slice
 		// Dedup urlsToAppend
 		dedupedUrls := dedupUrls(filteredUrls)
 		// check if already has been visited
@@ -82,8 +82,11 @@ func Crawl(urls, allowedDomains, disallowedDomains []string) []html.Node {
 		// --------- END OF CRAWLER SECTION -----------
 
 		// Append urls
-		frontier = append(frontier[1:], unseenUrls...)
-		if len(frontier) == 0 && len(unseenUrls) == 0 {
+		for _, unseenUrl := range unseenUrls {
+			frontier.Enqueue(unseenUrl)
+		}
+
+		if frontier.size == 0 {
 			break
 		}
 	}
@@ -143,9 +146,6 @@ func getUnseenUrls(urls, seenUrls []string) []string {
 	}
 	return unseenUrls
 }
-
-// TODO: Maybe split this function into traverseNode which runs fun for each node
-// and extractUrl which will be the function passed
 
 // TODO: Add better error handling, and maube use lib for url normalization
 //

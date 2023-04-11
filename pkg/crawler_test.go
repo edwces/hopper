@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	crawler "github.com/crawler/pkg"
 )
 
 func TestCrawl(t *testing.T) {
@@ -32,6 +30,7 @@ func TestCrawl(t *testing.T) {
 							</head>
 							<body>
 								<h1>hsdhdjhshjdh</h1>
+								<a href="/link2"></a>
 							</body>
 						</html>`))
 	})
@@ -43,6 +42,7 @@ func TestCrawl(t *testing.T) {
 							</head>
 							<body>
 								<h1>hsdhdjhshjdh</h1>
+								<a href="/link1"></a>
 							</body>
 						</html>`))
 	})
@@ -56,7 +56,7 @@ func TestCrawl(t *testing.T) {
 	server.Start()
 	defer server.Close()
 
-	results := crawler.Crawl([]string{"http://127.0.0.1:8080/"}, []string{"*"}, []string{})
+	results := Crawl([]string{"http://127.0.0.1:8080/"}, []string{"*"}, []string{})
 	if len(results) != 3 {
 		t.Errorf("Not enough results of a crawl")
 	}
