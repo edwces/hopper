@@ -1,7 +1,6 @@
 package crawler
 
 import (
-	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -147,31 +146,16 @@ func getUnseenUrls(urls, seenUrls []string) []string {
 	return unseenUrls
 }
 
-// TODO: Add better error handling, and maube use lib for url normalization
-//
 // normalizeUrl returns normalized version of the urlProccessed passed.
-func normalizeUrl(urlProccessed string, absoluteUrl string) (string, error) {
-	if urlProccessed == "#" || urlProccessed == "javascript:void(0)" {
-		return "", errors.New("invalid url")
+func normalizeUrl(rawUrl string, rawBaseUrl string) (string, error) {
+	baseUrl, err := url.Parse(rawBaseUrl)
+	if err != nil {
+		return "", err
 	}
-
-	if strings.HasPrefix(urlProccessed, "/") {
-		parsedAbsoluteUrl, errAbs := url.Parse(absoluteUrl)
-		parsedRelativeUrl, errRel := url.Parse(urlProccessed)
-		if errAbs != nil || errRel != nil {
-			return "", errRel
-		}
-		return parsedAbsoluteUrl.ResolveReference(parsedRelativeUrl).String(), nil
+	refUrl, err := url.Parse(rawUrl)
+	if err != nil {
+		return "", err
 	}
-
-	if strings.HasPrefix(urlProccessed, "?") {
-		parsedAbsoluteUrl, errAbs := url.Parse(absoluteUrl)
-		parsedQueryUrl, errQuery := url.Parse(urlProccessed)
-		if errAbs != nil || errQuery != nil {
-			return "", errQuery
-		}
-		return parsedAbsoluteUrl.ResolveReference(parsedQueryUrl).String(), nil
-	}
-
-	return urlProccessed, nil
+	normalizedUrl := baseUrl.ResolveReference(refUrl)
+	return normalizedUrl.String(), nil
 }
