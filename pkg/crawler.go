@@ -1,9 +1,12 @@
 package crawler
 
 import (
+	"errors"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
 	"golang.org/x/net/html"
@@ -12,56 +15,61 @@ import (
 func Crawl(urls, allowedDomains, disallowedDomains []string) map[string]html.Node {
 	// TODO: should be a multithreaded queue
 	frontier := NewQueue(urls...)
-	// TODO: should store pages in some database
 	storage := map[string]html.Node{}
 	seenUrls := map[string]bool{}
 
-	for {
-		// Fetch/Download data
-		urlProccessed := frontier.Dequeue()
-		// TODO: download robots.txt for domain if not cached
+	infoLogger := log.New(os.Stdout, "[INFO]: ", log.LstdFlags)
+	warningLogger := log.New(os.Stdout, "[WARN]: ", log.LstdFlags)
 
-		resp, err := http.Get(urlProccessed)
+	for {
+		rawUrl := frontier.Dequeue()
+		infoLogger.Printf("Fetching url: %s", rawUrl)
+		// TODO: download robots.txt for domain if not cached
+		resp, err := http.Get(rawUrl)
 
 		if err != nil && resp != nil {
 			resp.Body.Close()
+			warningLogger.Printf("Error fetching url: %s", err)
 			continue
 		} else if err != nil {
+			warningLogger.Printf("Error fetching url: %s", err)
 			continue
 		}
 
 		bytes, err := io.ReadAll(resp.Body)
-		if err != nil {
-			resp.Body.Close()
-			continue
-		}
-		utfresp := string(bytes)
-
-		// Parsing process
-		doc, err := html.Parse(strings.NewReader(utfresp))
 		resp.Body.Close()
 		if err != nil {
+			warningLogger.Printf("Error reading response body: %s", err)
+			continue
+		}
+		body := string(bytes)
+
+		// Parsing process
+		doc, err := html.Parse(strings.NewReader(body))
+		if err != nil {
+			warningLogger.Printf("Error parsing response body: %s", err)
 			continue
 		}
 
 		// Callback or Event
 		// add data to storage
-		storage[urlProccessed] = *doc
+		storage[rawUrl] = *doc
 
 		// -------------- ONLY IF USED AS CRAWLER ------------------
 		// extract links
-		urlsToAppend := []string{}
+		extractedUrls := []string{}
 		// check if given node is a link and recursively call all off its children
 		var f func(*html.Node)
 		f = func(node *html.Node) {
 			if node.Type == html.ElementNode && node.Data == "a" {
 				for _, attribute := range node.Attr {
 					if attribute.Key == "href" {
-						normalizedUrl, err := normalizeUrl(attribute.Val, urlProccessed)
+						normalizedUrl, err := normalizeUrl(attribute.Val, rawUrl)
 						if err != nil {
+							warningLogger.Printf("Error normalizing url: %s", err)
 							break
 						}
-						urlsToAppend = append(urlsToAppend, normalizedUrl)
+						extractedUrls = append(extractedUrls, normalizedUrl)
 					}
 				}
 			}
@@ -72,11 +80,11 @@ func Crawl(urls, allowedDomains, disallowedDomains []string) map[string]html.Nod
 		f(doc)
 
 		// filter URL
-		filteredUrls := filterUrls(urlsToAppend, allowedDomains, disallowedDomains)
+		filteredUrls := filterUrls(extractedUrls, allowedDomains, disallowedDomains)
 		// Dedup urlsToAppend
 		dedupedUrls := dedupUrls(filteredUrls)
 		// check if already has been visited
-		seenUrls[urlProccessed] = true
+		seenUrls[rawUrl] = true
 		unseenUrls := getUnseenUrls(dedupedUrls, seenUrls)
 		// --------- END OF CRAWLER SECTION -----------
 
@@ -159,5 +167,8 @@ func normalizeUrl(rawUrl string, rawBaseUrl string) (string, error) {
 		return "", err
 	}
 	normalizedUrl := baseUrl.ResolveReference(refUrl)
+	if normalizedUrl.Scheme != "http" && normalizedUrl.Scheme != "https" {
+		return "", errors.New("unsupported protocol")
+	}
 	return normalizedUrl.String(), nil
 }

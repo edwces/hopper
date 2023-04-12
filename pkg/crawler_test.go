@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestCrawl(t *testing.T) {
+func NewMockServer() (*httptest.Server, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -19,6 +19,8 @@ func TestCrawl(t *testing.T) {
 								<a href="/link1"></a>
 								<h1>hsdhdjhshjdh</h1>
 								<a href="/link2"></a>
+								<a href="#"></a>
+								<a href="javascript:void(0)"></a>
 							</body>
 						</html>`))
 	})
@@ -50,14 +52,35 @@ func TestCrawl(t *testing.T) {
 	server := httptest.NewUnstartedServer(mux)
 	l, err := net.Listen("tcp", "127.0.0.1:8080")
 	if err != nil {
-		t.Fatal(err)
+		return server, err
 	}
 	server.Listener = l
+	return server, nil
+}
+
+func TestCrawl(t *testing.T) {
+	server, err := NewMockServer()
+	if err != nil {
+		t.Fatalf("Server could not be started")
+	}
 	server.Start()
 	defer server.Close()
 
 	results := Crawl([]string{"http://127.0.0.1:8080/"}, []string{"*"}, []string{})
 	if len(results) != 3 {
 		t.Errorf("Incorrect length of results: got %d, expected: %d", len(results), 3)
+	}
+}
+
+func BenchmarkCrawl(b *testing.B) {
+	server, err := NewMockServer()
+	if err != nil {
+		b.Fatalf("Server could not be started")
+	}
+	server.Start()
+	defer server.Close()
+
+	for i := 0; i < b.N; i++ {
+		Crawl([]string{"http://127.0.0.1:8080/"}, []string{"*"}, []string{})
 	}
 }
