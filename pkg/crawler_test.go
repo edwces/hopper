@@ -58,6 +58,6 @@ func TestCrawl(t *testing.T) {
 
 	results := Crawl([]string{"http://127.0.0.1:8080/"}, []string{"*"}, []string{})
 	if len(results) != 3 {
-		t.Errorf("Not enough results of a crawl")
+		t.Errorf("Incorrect length of results: got %d, expected: %d", len(results), 3)
 	}
 }

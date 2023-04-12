@@ -9,12 +9,12 @@ import (
 	"golang.org/x/net/html"
 )
 
-func Crawl(urls, allowedDomains, disallowedDomains []string) []html.Node {
+func Crawl(urls, allowedDomains, disallowedDomains []string) map[string]html.Node {
 	// TODO: should be a multithreaded queue
 	frontier := NewQueue(urls...)
 	// TODO: should store pages in some database
-	storage := []html.Node{}
-	seenUrls := []string{urls[0]}
+	storage := map[string]html.Node{}
+	seenUrls := map[string]bool{}
 
 	for {
 		// Fetch/Download data
@@ -46,7 +46,7 @@ func Crawl(urls, allowedDomains, disallowedDomains []string) []html.Node {
 
 		// Callback or Event
 		// add data to storage
-		storage = append(storage, *doc)
+		storage[urlProccessed] = *doc
 
 		// -------------- ONLY IF USED AS CRAWLER ------------------
 		// extract links
@@ -76,13 +76,14 @@ func Crawl(urls, allowedDomains, disallowedDomains []string) []html.Node {
 		// Dedup urlsToAppend
 		dedupedUrls := dedupUrls(filteredUrls)
 		// check if already has been visited
+		seenUrls[urlProccessed] = true
 		unseenUrls := getUnseenUrls(dedupedUrls, seenUrls)
-		seenUrls = append(seenUrls, unseenUrls...)
 		// --------- END OF CRAWLER SECTION -----------
 
 		// Append urls
 		for _, unseenUrl := range unseenUrls {
 			frontier.Enqueue(unseenUrl)
+			seenUrls[unseenUrl] = true
 		}
 
 		if frontier.size == 0 {
@@ -136,10 +137,11 @@ func dedupUrls(urls []string) []string {
 
 // getUnseenUrls returns a set like diferrence
 // between first and second passed slices of urls.
-func getUnseenUrls(urls, seenUrls []string) []string {
+func getUnseenUrls(urls []string, seenUrls map[string]bool) []string {
 	unseenUrls := []string{}
 	for _, urlProccessed := range urls {
-		if !contains(seenUrls, urlProccessed) {
+		_, doesExist := seenUrls[urlProccessed]
+		if !doesExist {
 			unseenUrls = append(unseenUrls, urlProccessed)
 		}
 	}
