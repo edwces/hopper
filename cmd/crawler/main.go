@@ -6,5 +6,6 @@ import (
 
 // Todo: some basic CLI here
 func main() {
-	crawler.Crawl([]string{}, []string{"*"}, []string{})
+	dcrawler := crawler.Crawler{Seeds: []string{""}}
+	dcrawler.Crawl()
 }

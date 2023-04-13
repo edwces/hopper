@@ -12,93 +12,120 @@ import (
 	"golang.org/x/net/html"
 )
 
-func Crawl(urls, allowedDomains, disallowedDomains []string) map[string]html.Node {
-	// TODO: should be a multithreaded queue
-	frontier := NewQueue(urls...)
-	storage := map[string]html.Node{}
-	seenUrls := map[string]bool{}
+type Crawler struct {
+	// Staritng URLS to crawl
+	Seeds []string
 
-	infoLogger := log.New(os.Stdout, "[INFO]: ", log.LstdFlags)
-	warningLogger := log.New(os.Stdout, "[WARN]: ", log.LstdFlags)
+	// Used for filtering URLS
+	AllowedDomains    []string
+	DisallowedDomains []string
+
+	frontier *Queue[string]
+	storage  map[string]html.Node
+	seenUrls map[string]bool
+
+	infoLogger    *log.Logger
+	warningLogger *log.Logger
+	errorLogger   *log.Logger
+}
+
+// Crawl returns websites data accumulated by crawling over webpages
+func (c *Crawler) Crawl() map[string]html.Node {
+	c.infoLogger = log.New(os.Stdout, "[INFO]: ", log.LstdFlags)
+	c.warningLogger = log.New(os.Stdout, "[WARN]: ", log.LstdFlags)
+	c.errorLogger = log.New(os.Stdout, "[ERROR]: ", log.LstdFlags)
+
+	if len(c.Seeds) == 0 {
+		c.errorLogger.Fatalln("Seeds to crawl have not been specified")
+	}
+	if c.AllowedDomains == nil {
+		c.AllowedDomains = []string{"*"}
+	}
+	if c.DisallowedDomains == nil {
+		c.DisallowedDomains = []string{""}
+	}
+
+	c.frontier = NewQueue(c.Seeds...)
+	c.storage = map[string]html.Node{}
+	c.seenUrls = map[string]bool{}
+
+	for _, seed := range c.Seeds {
+		c.seenUrls[seed] = true
+	}
 
 	for {
-		rawUrl := frontier.Dequeue()
-		infoLogger.Printf("Fetching url: %s", rawUrl)
-		// TODO: download robots.txt for domain if not cached
-		resp, err := http.Get(rawUrl)
-
-		if err != nil && resp != nil {
-			resp.Body.Close()
-			warningLogger.Printf("Error fetching url: %s", err)
-			continue
-		} else if err != nil {
-			warningLogger.Printf("Error fetching url: %s", err)
-			continue
-		}
-
-		bytes, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			warningLogger.Printf("Error reading response body: %s", err)
-			continue
-		}
-		body := string(bytes)
-
-		// Parsing process
-		doc, err := html.Parse(strings.NewReader(body))
-		if err != nil {
-			warningLogger.Printf("Error parsing response body: %s", err)
-			continue
-		}
-
-		// Callback or Event
-		// add data to storage
-		storage[rawUrl] = *doc
-
-		// -------------- ONLY IF USED AS CRAWLER ------------------
-		// extract links
-		extractedUrls := []string{}
-		// check if given node is a link and recursively call all off its children
-		var f func(*html.Node)
-		f = func(node *html.Node) {
-			if node.Type == html.ElementNode && node.Data == "a" {
-				for _, attribute := range node.Attr {
-					if attribute.Key == "href" {
-						normalizedUrl, err := normalizeUrl(attribute.Val, rawUrl)
-						if err != nil {
-							warningLogger.Printf("Error normalizing url: %s", err)
-							break
-						}
-						extractedUrls = append(extractedUrls, normalizedUrl)
-					}
-				}
-			}
-			for curr := node.FirstChild; curr != nil; curr = curr.NextSibling {
-				f(curr)
-			}
-		}
-		f(doc)
-
-		// filter URL
-		filteredUrls := filterUrls(extractedUrls, allowedDomains, disallowedDomains)
-		// Dedup urlsToAppend
-		dedupedUrls := dedupUrls(filteredUrls)
-		// check if already has been visited
-		seenUrls[rawUrl] = true
-		unseenUrls := getUnseenUrls(dedupedUrls, seenUrls)
-		// --------- END OF CRAWLER SECTION -----------
-
-		// Append urls
-		for _, unseenUrl := range unseenUrls {
-			frontier.Enqueue(unseenUrl)
-			seenUrls[unseenUrl] = true
-		}
-
-		if frontier.size == 0 {
+		c.pipe(c.frontier.Dequeue())
+		if c.frontier.size == 0 {
 			break
 		}
 	}
-	return storage
+
+	return c.storage
+}
+
+func (c *Crawler) pipe(rawUrl string) error {
+	c.infoLogger.Printf("Fetching url: %s", rawUrl)
+
+	resp, err := http.Get(rawUrl)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+	if err != nil {
+		c.warningLogger.Printf("Could not return response for url: %s", rawUrl)
+		return err
+	}
+
+	bytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.warningLogger.Printf("Could not read body for url: %s", rawUrl)
+		return err
+	}
+
+	doc, err := html.Parse(strings.NewReader(string(bytes)))
+	if err != nil {
+		c.warningLogger.Printf("Could not parse body for url: %s", rawUrl)
+		return err
+	}
+
+	c.storage[rawUrl] = *doc
+
+	extractedUrls := c.extractUrls(doc, rawUrl)
+	filteredUrls := filterUrls(extractedUrls, c.AllowedDomains, c.DisallowedDomains)
+	dedupedUrls := dedupUrls(filteredUrls)
+	unseenUrls := getUnseenUrls(dedupedUrls, c.seenUrls)
+
+	for _, url := range unseenUrls {
+		c.frontier.Enqueue(url)
+		c.seenUrls[url] = true
+	}
+
+	return nil
+}
+
+func (c *Crawler) extractUrls(node *html.Node, rawUrl string) []string {
+	extractedUrls := []string{}
+
+	var f func(node *html.Node, rawUrl string)
+	f = func(node *html.Node, rawUrl string) {
+		if node.Type == html.ElementNode && node.Data == "a" {
+			for _, attribute := range node.Attr {
+				if attribute.Key == "href" {
+					normalizedUrl, err := normalizeUrl(attribute.Val, rawUrl)
+					if err != nil {
+						c.warningLogger.Printf("Could not normalize url: %s", err)
+						break
+					}
+					extractedUrls = append(extractedUrls, normalizedUrl)
+				}
+			}
+		}
+		for curr := node.FirstChild; curr != nil; curr = curr.NextSibling {
+			f(curr, rawUrl)
+		}
+	}
+	f(node, rawUrl)
+
+	return extractedUrls
 }
 
 // contains returns true only if passed slice contains passed item

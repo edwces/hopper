@@ -66,7 +66,8 @@ func TestCrawl(t *testing.T) {
 	server.Start()
 	defer server.Close()
 
-	results := Crawl([]string{"http://127.0.0.1:8080/"}, []string{"*"}, []string{})
+	crawler := Crawler{Seeds: []string{"http://127.0.0.1:8080/"}}
+	results := crawler.Crawl()
 	if len(results) != 3 {
 		t.Errorf("Incorrect length of results: got %d, expected: %d", len(results), 3)
 	}
@@ -81,6 +82,7 @@ func BenchmarkCrawl(b *testing.B) {
 	defer server.Close()
 
 	for i := 0; i < b.N; i++ {
-		Crawl([]string{"http://127.0.0.1:8080/"}, []string{"*"}, []string{})
+		crawler := Crawler{Seeds: []string{"http://127.0.0.1:8080/"}}
+		crawler.Crawl()
 	}
 }
