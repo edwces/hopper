@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 
 	"golang.org/x/net/html"
 )
@@ -20,9 +21,11 @@ type Crawler struct {
 	AllowedDomains    []string
 	DisallowedDomains []string
 
-	frontier *Queue[string]
+	frontier chan string
 	storage  map[string]html.Node
 	seenUrls map[string]bool
+
+	wg sync.WaitGroup
 
 	infoLogger    *log.Logger
 	warningLogger *log.Logger
@@ -45,25 +48,34 @@ func (c *Crawler) Crawl() map[string]html.Node {
 		c.DisallowedDomains = []string{""}
 	}
 
-	c.frontier = NewQueue(c.Seeds...)
+	// TODO: maybe make concurrency safe queue with locks
+	c.frontier = make(chan string, 2)
 	c.storage = map[string]html.Node{}
+	// FIXME: unsafe map writes/reads
 	c.seenUrls = map[string]bool{}
+
+	c.wg = sync.WaitGroup{}
 
 	for _, seed := range c.Seeds {
 		c.seenUrls[seed] = true
+		c.wg.Add(1)
+		go func(url string) { c.frontier <- url }(seed)
 	}
 
-	for {
-		c.pipe(c.frontier.Dequeue())
-		if c.frontier.size == 0 {
-			break
-		}
-	}
+	// when all goroutines finished close the channel
+	go func() {
+		c.wg.Wait()
+		close(c.frontier)
+	}()
 
+	for url := range c.frontier {
+		go c.pipe(url)
+	}
 	return c.storage
 }
 
 func (c *Crawler) pipe(rawUrl string) error {
+	defer c.wg.Done()
 	c.infoLogger.Printf("Fetching url: %s", rawUrl)
 
 	resp, err := http.Get(rawUrl)
@@ -95,7 +107,8 @@ func (c *Crawler) pipe(rawUrl string) error {
 	unseenUrls := getUnseenUrls(dedupedUrls, c.seenUrls)
 
 	for _, url := range unseenUrls {
-		c.frontier.Enqueue(url)
+		c.wg.Add(1)
+		c.frontier <- url
 		c.seenUrls[url] = true
 	}
 
