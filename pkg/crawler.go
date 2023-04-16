@@ -25,7 +25,8 @@ type Crawler struct {
 	storage  map[string]html.Node
 	seenUrls map[string]bool
 
-	wg sync.WaitGroup
+	mut sync.RWMutex
+	wg  sync.WaitGroup
 
 	infoLogger    *log.Logger
 	warningLogger *log.Logger
@@ -51,7 +52,6 @@ func (c *Crawler) Crawl() map[string]html.Node {
 	// TODO: maybe make concurrency safe queue with locks
 	c.frontier = make(chan string, 2)
 	c.storage = map[string]html.Node{}
-	// FIXME: unsafe map writes/reads
 	c.seenUrls = map[string]bool{}
 
 	c.wg = sync.WaitGroup{}
@@ -99,7 +99,9 @@ func (c *Crawler) pipe(rawUrl string) error {
 		return err
 	}
 
+	c.mut.Lock()
 	c.storage[rawUrl] = *doc
+	c.mut.Unlock()
 
 	extractedUrls := c.extractUrls(doc, rawUrl)
 	filteredUrls := filterUrls(extractedUrls, c.AllowedDomains, c.DisallowedDomains)
@@ -109,7 +111,10 @@ func (c *Crawler) pipe(rawUrl string) error {
 	for _, url := range unseenUrls {
 		c.wg.Add(1)
 		c.frontier <- url
+
+		c.mut.Lock()
 		c.seenUrls[url] = true
+		c.mut.Unlock()
 	}
 
 	return nil
