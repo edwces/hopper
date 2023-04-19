@@ -1,44 +1,81 @@
 package crawler
 
-type Node[T comparable] struct {
-	value T
-	next  *Node[T]
+import (
+	"container/heap"
+	"sync"
+)
+
+type Item struct {
+	value    any
+	priority int
 }
 
-type Queue[T comparable] struct {
-	head *Node[T]
-	tail *Node[T]
-	size int
+type PQueue []*Item
+
+// TODO: Improve Permormance
+type SafePQueue struct {
+	sync.RWMutex
+
+	queue heap.Interface
 }
 
-func NewQueue[T comparable](values ...T) *Queue[T] {
-	qp := &Queue[T]{}
-	for _, value := range values {
-		qp.Enqueue(value)
-	}
-	return qp
+// Len returns size of priority queue.
+func (pq PQueue) Len() int {
+	return len(pq)
 }
 
-func (qp *Queue[T]) Dequeue() T {
-	if qp.head == nil {
-		return *new(T)
-	}
-	popped := qp.head.value
-	qp.head = qp.head.next
-	qp.size--
+// Less returns true if Item with index j has lower priority than
+// Item with index i.
+func (pq PQueue) Less(i, j int) bool {
+	return pq[i].priority > pq[j].priority
+}
+
+// Swap swaps heap items with indexes i, j.
+func (pq PQueue) Swap(i, j int) {
+	pq[i], pq[j] = pq[j], pq[i]
+}
+
+// Push appends an Item to the heap.
+func (pq *PQueue) Push(x any) {
+	item := x.(*Item)
+	*pq = append(*pq, item)
+}
+
+// Pop removes and returns item with a highest priority.
+func (pq *PQueue) Pop() any {
+	n := len(*pq)
+	full := *pq
+	popped := full[n-1]
+	full[n-1] = nil
+	*pq = full[:n-1]
 	return popped
 }
 
-func (qp *Queue[T]) Enqueue(value T) {
-	n := &Node[T]{value: value, next: nil}
-	if qp.head == nil {
-		qp.head = n
-	} else if qp.tail == nil {
-		qp.head.next = n
-		qp.tail = n
-	} else {
-		qp.tail.next = n
-		qp.tail = n
-	}
-	qp.size++
+// Init heapifies all items in queue.
+func (spq *SafePQueue) Init(items ...*Item) {
+	pq := PQueue{}
+	copy(pq, items)
+	spq.queue = &pq
+	heap.Init(spq.queue)
+}
+
+// Push safely adds item to queue.
+func (spq *SafePQueue) Push(x Item) {
+	spq.Lock()
+	defer spq.Unlock()
+	heap.Push(spq.queue, x)
+}
+
+// Pop returns and removes item with highest priority
+func (spq *SafePQueue) Pop() *Item {
+	spq.Lock()
+	defer spq.Unlock()
+	return heap.Pop(spq.queue).(*Item)
+}
+
+// Len returns size of priority queue.
+func (spq *SafePQueue) Len() int {
+	spq.RLock()
+	defer spq.RUnlock()
+	return spq.queue.Len()
 }
