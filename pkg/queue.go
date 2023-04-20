@@ -60,7 +60,7 @@ func (spq *SafePQueue) Init(items ...*Item) {
 }
 
 // Push safely adds item to queue.
-func (spq *SafePQueue) Push(x Item) {
+func (spq *SafePQueue) Push(x *Item) {
 	spq.Lock()
 	defer spq.Unlock()
 	heap.Push(spq.queue, x)

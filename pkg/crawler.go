@@ -21,7 +21,8 @@ type Crawler struct {
 	AllowedDomains    []string
 	DisallowedDomains []string
 
-	frontier chan string
+	frontier *SafePQueue
+	pushChan chan int
 	storage  map[string]html.Node
 	seenUrls map[string]bool
 
@@ -50,26 +51,31 @@ func (c *Crawler) Crawl() map[string]html.Node {
 	}
 
 	// TODO: maybe make concurrency safe queue with locks
-	c.frontier = make(chan string, 2)
+	c.frontier = &SafePQueue{}
+	c.pushChan = make(chan int, 100)
 	c.storage = map[string]html.Node{}
 	c.seenUrls = map[string]bool{}
 
 	c.wg = sync.WaitGroup{}
+	c.frontier.Init()
 
 	for _, seed := range c.Seeds {
 		c.seenUrls[seed] = true
 		c.wg.Add(1)
-		go func(url string) { c.frontier <- url }(seed)
+		c.frontier.Push(&Item{value: seed, priority: 1})
+		go func() {
+			c.pushChan <- 1
+		}()
 	}
 
 	// when all goroutines finished close the channel
 	go func() {
 		c.wg.Wait()
-		close(c.frontier)
+		close(c.pushChan)
 	}()
 
-	for url := range c.frontier {
-		go c.pipe(url)
+	for range c.pushChan {
+		go c.pipe(c.frontier.Pop().value.(string))
 	}
 	return c.storage
 }
@@ -110,7 +116,8 @@ func (c *Crawler) pipe(rawUrl string) error {
 
 	for _, url := range unseenUrls {
 		c.wg.Add(1)
-		c.frontier <- url
+		c.frontier.Push(&Item{value: url, priority: 1})
+		c.pushChan <- 1
 
 		c.mut.Lock()
 		c.seenUrls[url] = true
