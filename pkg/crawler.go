@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/net/html"
 )
@@ -25,9 +26,11 @@ type Crawler struct {
 	pushChan chan int
 	storage  map[string]html.Node
 	seenUrls map[string]bool
+	delay    time.Duration
 
-	mut sync.RWMutex
-	wg  sync.WaitGroup
+	mut    sync.RWMutex
+	wg     sync.WaitGroup
+	ticker time.Ticker
 
 	infoLogger    *log.Logger
 	warningLogger *log.Logger
@@ -49,12 +52,16 @@ func (c *Crawler) Crawl() map[string]html.Node {
 	if c.DisallowedDomains == nil {
 		c.DisallowedDomains = []string{""}
 	}
+	if c.delay == 0 {
+		c.delay = time.Second
+	}
 
 	// TODO: maybe make concurrency safe queue with locks
 	c.frontier = &SafePQueue{}
 	c.pushChan = make(chan int, 100)
 	c.storage = map[string]html.Node{}
 	c.seenUrls = map[string]bool{}
+	c.ticker = *time.NewTicker(c.delay)
 
 	c.wg = sync.WaitGroup{}
 	c.frontier.Init()
@@ -82,8 +89,9 @@ func (c *Crawler) Crawl() map[string]html.Node {
 
 func (c *Crawler) pipe(rawUrl string) error {
 	defer c.wg.Done()
-	c.infoLogger.Printf("Fetching url: %s", rawUrl)
 
+	<-c.ticker.C
+	c.infoLogger.Printf("Fetching url: %s", rawUrl)
 	resp, err := http.Get(rawUrl)
 	if resp != nil {
 		defer resp.Body.Close()
