@@ -1,6 +1,7 @@
 package hopper
 
 import (
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -45,8 +46,13 @@ func NewMockServer() (*httptest.Server, error) {
 							<body>
 								<h1>hsdhdjhshjdh</h1>
 								<a href="/link1"></a>
+								<a href="/mime"></a>
 							</body>
 						</html>`))
+	})
+	mux.HandleFunc("/mime", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "plain/text")
+		fmt.Fprint(w, "Hello Mars")
 	})
 
 	server := httptest.NewUnstartedServer(mux)
@@ -72,6 +78,23 @@ func TestCrawl(t *testing.T) {
 	if len(results) != 3 {
 		t.Errorf("Incorrect length of results: got %d, expected: %d", len(results), 3)
 	}
+}
+
+func TestCrawlMime(t *testing.T) {
+	server, err := NewMockServer()
+	if err != nil {
+		t.Fatalf("Server could not be started")
+	}
+	server.Start()
+	defer server.Close()
+
+	crawler := Crawler{Mediatype: "plain/text"}
+	crawler.Init()
+	results := crawler.Crawl("http://127.0.0.1:8080/")
+	if len(results) != 1 {
+		t.Errorf("Incorrect length of results: got %d, expected: %d", len(results), 1)
+	}
+
 }
 
 func BenchmarkCrawl(b *testing.B) {

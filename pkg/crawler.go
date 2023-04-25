@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -24,9 +25,10 @@ type Crawler struct {
 	AllowedDomains    []string
 	DisallowedDomains []string
 	Delay             time.Duration
+	Mediatype         string
 
 	frontier *SafePQueue
-	storage  map[string]html.Node
+	storage  map[string]any
 	seenUrls map[string]bool
 
 	mut    sync.RWMutex
@@ -35,7 +37,10 @@ type Crawler struct {
 }
 
 // Init initializes default values for crawler.
-func (c *Crawler) Init() {
+func (c *Crawler) Init() error {
+	if c.Mediatype == "" {
+		c.Mediatype = "text/html"
+	}
 	if c.AllowedDomains == nil {
 		c.AllowedDomains = []string{"*"}
 	}
@@ -46,18 +51,25 @@ func (c *Crawler) Init() {
 		c.Delay = time.Second
 	}
 
+	_, _, err := mime.ParseMediaType(c.Mediatype)
+	if err != nil {
+		errorLogger.Printf("Invalid mime type")
+		return err
+	}
+
 	c.frontier = &SafePQueue{}
 	c.frontier.Init()
-	c.storage = map[string]html.Node{}
+	c.storage = map[string]any{}
 	c.seenUrls = map[string]bool{}
 	c.ticker = time.NewTicker(c.Delay)
 	c.wg = sync.WaitGroup{}
 
 	infoLogger.Printf("Crawler initialized succesfully")
+	return nil
 }
 
 // Crawl returns websites data accumulated by crawling over webpages
-func (c *Crawler) Crawl(seeds ...string) map[string]html.Node {
+func (c *Crawler) Crawl(seeds ...string) map[string]any {
 
 	for _, seed := range seeds {
 		c.seenUrls[seed] = true
@@ -95,6 +107,10 @@ func (c *Crawler) Visit(uri string) error {
 		warningLogger.Printf("Could not return response for url: %s", uri)
 		return err
 	}
+	mediatype, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if mediatype != c.Mediatype && mediatype != "text/html" {
+		return nil
+	}
 
 	bytes, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -102,15 +118,20 @@ func (c *Crawler) Visit(uri string) error {
 		return err
 	}
 
+	if mediatype == c.Mediatype {
+		c.mut.Lock()
+		c.storage[uri] = string(bytes)
+		c.mut.Unlock()
+	}
+	if mediatype != "text/html" {
+		return nil
+	}
+
 	doc, err := html.Parse(strings.NewReader(string(bytes)))
 	if err != nil {
 		warningLogger.Printf("Could not parse body for url: %s", uri)
 		return err
 	}
-
-	c.mut.Lock()
-	c.storage[uri] = *doc
-	c.mut.Unlock()
 
 	extractedUrls := extractUrls(doc, uri)
 	filteredUrls := filterUrls(extractedUrls, c.AllowedDomains, c.DisallowedDomains)
