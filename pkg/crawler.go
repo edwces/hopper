@@ -21,6 +21,11 @@ var (
 	errorLogger   = log.New(os.Stdout, "[ERROR]: ", log.LstdFlags)
 )
 
+const (
+	DefaultDelay    = time.Second
+	DefaulMediatype = "text/html"
+)
+
 type Crawler struct {
 	AllowedDomains    []string
 	DisallowedDomains []string
@@ -39,7 +44,7 @@ type Crawler struct {
 // Init initializes default values for crawler.
 func (c *Crawler) Init() error {
 	if c.Mediatype == "" {
-		c.Mediatype = "text/html"
+		c.Mediatype = DefaulMediatype
 	}
 	if c.AllowedDomains == nil {
 		c.AllowedDomains = []string{"*"}
@@ -48,7 +53,7 @@ func (c *Crawler) Init() error {
 		c.DisallowedDomains = []string{""}
 	}
 	if c.Delay == 0 {
-		c.Delay = time.Second
+		c.Delay = DefaultDelay
 	}
 
 	_, _, err := mime.ParseMediaType(c.Mediatype)
