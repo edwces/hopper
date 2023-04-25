@@ -135,7 +135,7 @@ func (c *Crawler) Visit(uri string) error {
 
 	extractedUrls := extractUrls(doc, uri)
 	filteredUrls := filterUrls(extractedUrls, c.AllowedDomains, c.DisallowedDomains)
-	dedupedUrls := dedupUrls(filteredUrls)
+	dedupedUrls := dedup(filteredUrls)
 	unseenUrls := getUnseenUrls(dedupedUrls, c.seenUrls)
 
 	for _, url := range unseenUrls {
@@ -150,15 +150,14 @@ func (c *Crawler) Visit(uri string) error {
 	return nil
 }
 
-func extractUrls(node *html.Node, rawUrl string) []string {
+// extractUrls returns all urls extracted from given node tree
+func extractUrls(node *html.Node, uri string) []string {
 	extractedUrls := []string{}
-
-	var f func(node *html.Node, rawUrl string)
-	f = func(node *html.Node, rawUrl string) {
+	searchNode(node, func(node *html.Node) {
 		if node.Type == html.ElementNode && node.Data == "a" {
 			for _, attribute := range node.Attr {
 				if attribute.Key == "href" {
-					normalizedUrl, err := normalizeUrl(attribute.Val, rawUrl)
+					normalizedUrl, err := normalizeUrl(attribute.Val, uri)
 					if err != nil {
 						warningLogger.Printf("Could not normalize url: %s", err)
 						break
@@ -167,16 +166,20 @@ func extractUrls(node *html.Node, rawUrl string) []string {
 				}
 			}
 		}
-		for curr := node.FirstChild; curr != nil; curr = curr.NextSibling {
-			f(curr, rawUrl)
-		}
-	}
-	f(node, rawUrl)
-
+	})
 	return extractedUrls
 }
 
-// contains returns true only if passed slice contains passed item
+// searchNode executes func for each node in a tree.
+func searchNode(node *html.Node, fn func(*html.Node)) {
+	fn(node)
+
+	for curr := node.FirstChild; curr != nil; curr = curr.NextSibling {
+		searchNode(curr, fn)
+	}
+}
+
+// contains returns true only if passed slice contains passed item.
 func contains[T comparable](slice []T, itemToCheck T) bool {
 	for _, item := range slice {
 		if item == itemToCheck {
@@ -184,6 +187,20 @@ func contains[T comparable](slice []T, itemToCheck T) bool {
 		}
 	}
 	return false
+}
+
+// dedup returns a slice where every element is unique.
+func dedup[T comparable](slice []T) []T {
+	deduped := []T{}
+	dedupedMap := map[T]bool{}
+	for _, item := range slice {
+		if !dedupedMap[item] {
+			deduped = append(deduped, item)
+			dedupedMap[item] = true
+		}
+	}
+	return deduped
+
 }
 
 // filterUrls returns a urls filtered based on passed filter rules
@@ -203,19 +220,6 @@ func filterUrls(urls, allowedDomains, disallowedDomains []string) []string {
 		filteredUrls = append(filteredUrls, urlProccessed)
 	}
 	return filteredUrls
-}
-
-// TODO: Optimize deduping algorithm
-//
-// dedupUrls returns a slice where every url is unique.
-func dedupUrls(urls []string) []string {
-	dedupedUrls := []string{}
-	for _, urlProccessed := range urls {
-		if !contains(dedupedUrls, urlProccessed) {
-			dedupedUrls = append(dedupedUrls, urlProccessed)
-		}
-	}
-	return dedupedUrls
 }
 
 // getUnseenUrls returns a set like diferrence
