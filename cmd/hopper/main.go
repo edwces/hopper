@@ -4,6 +4,7 @@ import hopper "github.com/edwces/hopper/pkg"
 
 // Todo: some basic CLI here
 func main() {
-	crawler := hopper.Crawler{Seeds: []string{}}
-	crawler.Crawl()
+	crawler := hopper.Crawler{}
+	crawler.Init()
+	crawler.Crawl("")
 }

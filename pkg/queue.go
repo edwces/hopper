@@ -16,6 +16,7 @@ type PQueue []*Item
 type SafePQueue struct {
 	sync.RWMutex
 
+	done  bool
 	queue heap.Interface
 }
 
@@ -54,9 +55,20 @@ func (pq *PQueue) Pop() any {
 // Init heapifies all items in queue.
 func (spq *SafePQueue) Init(items ...*Item) {
 	pq := PQueue{}
+	spq.done = false
 	copy(pq, items)
 	spq.queue = &pq
 	heap.Init(spq.queue)
+}
+
+func (spq *SafePQueue) IsDone() bool {
+	return spq.done
+}
+
+func (spq *SafePQueue) Done() {
+	spq.Lock()
+	spq.done = true
+	spq.Unlock()
 }
 
 // Push safely adds item to queue.

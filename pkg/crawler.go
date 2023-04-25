@@ -14,110 +14,105 @@ import (
 	"golang.org/x/net/html"
 )
 
-type Crawler struct {
-	// Staritng URLS to crawl
-	Seeds []string
+var (
+	infoLogger    = log.New(os.Stdout, "[INFO]: ", log.LstdFlags)
+	warningLogger = log.New(os.Stdout, "[WARN]: ", log.LstdFlags)
+	errorLogger   = log.New(os.Stdout, "[ERROR]: ", log.LstdFlags)
+)
 
-	// Used for filtering URLS
+type Crawler struct {
 	AllowedDomains    []string
 	DisallowedDomains []string
+	Delay             time.Duration
 
 	frontier *SafePQueue
-	pushChan chan int
 	storage  map[string]html.Node
 	seenUrls map[string]bool
-	delay    time.Duration
 
 	mut    sync.RWMutex
 	wg     sync.WaitGroup
-	ticker time.Ticker
-
-	infoLogger    *log.Logger
-	warningLogger *log.Logger
-	errorLogger   *log.Logger
+	ticker *time.Ticker
 }
 
-// Crawl returns websites data accumulated by crawling over webpages
-func (c *Crawler) Crawl() map[string]html.Node {
-	c.infoLogger = log.New(os.Stdout, "[INFO]: ", log.LstdFlags)
-	c.warningLogger = log.New(os.Stdout, "[WARN]: ", log.LstdFlags)
-	c.errorLogger = log.New(os.Stdout, "[ERROR]: ", log.LstdFlags)
-
-	if len(c.Seeds) == 0 {
-		c.errorLogger.Fatalln("Seeds to crawl have not been specified")
-	}
+// Init initializes default values for crawler.
+func (c *Crawler) Init() {
 	if c.AllowedDomains == nil {
 		c.AllowedDomains = []string{"*"}
 	}
 	if c.DisallowedDomains == nil {
 		c.DisallowedDomains = []string{""}
 	}
-	if c.delay == 0 {
-		c.delay = time.Second
+	if c.Delay == 0 {
+		c.Delay = time.Second
 	}
 
-	// TODO: maybe make concurrency safe queue with locks
 	c.frontier = &SafePQueue{}
-	c.pushChan = make(chan int, 100)
+	c.frontier.Init()
 	c.storage = map[string]html.Node{}
 	c.seenUrls = map[string]bool{}
-	c.ticker = *time.NewTicker(c.delay)
-
+	c.ticker = time.NewTicker(c.Delay)
 	c.wg = sync.WaitGroup{}
-	c.frontier.Init()
 
-	for _, seed := range c.Seeds {
+	infoLogger.Printf("Crawler initialized succesfully")
+}
+
+// Crawl returns websites data accumulated by crawling over webpages
+func (c *Crawler) Crawl(seeds ...string) map[string]html.Node {
+
+	for _, seed := range seeds {
 		c.seenUrls[seed] = true
 		c.wg.Add(1)
 		c.frontier.Push(&Item{value: seed, priority: 1})
-		go func() {
-			c.pushChan <- 1
-		}()
 	}
 
-	// when all goroutines finished close the channel
 	go func() {
 		c.wg.Wait()
-		close(c.pushChan)
+		c.frontier.Done()
 	}()
 
-	for range c.pushChan {
-		go c.pipe(c.frontier.Pop().value.(string))
+	// TODO: should probably be done with channels somehow which are linked to frontier
+	for {
+		if c.frontier.IsDone() {
+			break
+		}
+		if c.frontier.Len() != 0 {
+			go c.Visit(c.frontier.Pop().value.(string))
+		}
 	}
 	return c.storage
 }
 
-func (c *Crawler) pipe(rawUrl string) error {
+func (c *Crawler) Visit(uri string) error {
 	defer c.wg.Done()
 
 	<-c.ticker.C
-	c.infoLogger.Printf("Fetching url: %s", rawUrl)
-	resp, err := http.Get(rawUrl)
+	infoLogger.Printf("Fetching url: %s", uri)
+	resp, err := http.Get(uri)
 	if resp != nil {
 		defer resp.Body.Close()
 	}
 	if err != nil {
-		c.warningLogger.Printf("Could not return response for url: %s", rawUrl)
+		warningLogger.Printf("Could not return response for url: %s", uri)
 		return err
 	}
 
 	bytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		c.warningLogger.Printf("Could not read body for url: %s", rawUrl)
+		warningLogger.Printf("Could not read body for url: %s", uri)
 		return err
 	}
 
 	doc, err := html.Parse(strings.NewReader(string(bytes)))
 	if err != nil {
-		c.warningLogger.Printf("Could not parse body for url: %s", rawUrl)
+		warningLogger.Printf("Could not parse body for url: %s", uri)
 		return err
 	}
 
 	c.mut.Lock()
-	c.storage[rawUrl] = *doc
+	c.storage[uri] = *doc
 	c.mut.Unlock()
 
-	extractedUrls := c.extractUrls(doc, rawUrl)
+	extractedUrls := extractUrls(doc, uri)
 	filteredUrls := filterUrls(extractedUrls, c.AllowedDomains, c.DisallowedDomains)
 	dedupedUrls := dedupUrls(filteredUrls)
 	unseenUrls := getUnseenUrls(dedupedUrls, c.seenUrls)
@@ -125,7 +120,6 @@ func (c *Crawler) pipe(rawUrl string) error {
 	for _, url := range unseenUrls {
 		c.wg.Add(1)
 		c.frontier.Push(&Item{value: url, priority: 1})
-		c.pushChan <- 1
 
 		c.mut.Lock()
 		c.seenUrls[url] = true
@@ -135,7 +129,7 @@ func (c *Crawler) pipe(rawUrl string) error {
 	return nil
 }
 
-func (c *Crawler) extractUrls(node *html.Node, rawUrl string) []string {
+func extractUrls(node *html.Node, rawUrl string) []string {
 	extractedUrls := []string{}
 
 	var f func(node *html.Node, rawUrl string)
@@ -145,7 +139,7 @@ func (c *Crawler) extractUrls(node *html.Node, rawUrl string) []string {
 				if attribute.Key == "href" {
 					normalizedUrl, err := normalizeUrl(attribute.Val, rawUrl)
 					if err != nil {
-						c.warningLogger.Printf("Could not normalize url: %s", err)
+						warningLogger.Printf("Could not normalize url: %s", err)
 						break
 					}
 					extractedUrls = append(extractedUrls, normalizedUrl)
