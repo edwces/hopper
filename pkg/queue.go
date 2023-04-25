@@ -51,6 +51,12 @@ func (pq *PQueue) Pop() any {
 	return popped
 }
 
+func (pq *PQueue) Peek() any {
+	n := len(*pq)
+	full := *pq
+	return full[n-1]
+}
+
 // Init heapifies all items in queue.
 func (spq *SafePQueue) Init(items ...*Item) {
 	pq := PQueue{}
