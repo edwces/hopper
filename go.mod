@@ -1,4 +1,4 @@
-module github.com/crawler
+module github.com/edwces/hopper
 
 go 1.20
 
