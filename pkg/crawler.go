@@ -23,6 +23,7 @@ var (
 
 const (
 	DefaultDelay    = time.Second
+	DefaultTimeout  = time.Second * 5
 	DefaulMediatype = "text/html"
 )
 
@@ -31,6 +32,7 @@ type Crawler struct {
 	DisallowedDomains []string
 	Delay             time.Duration
 	Mediatype         string
+	HttpClient        *http.Client
 
 	frontier *SafePQueue
 	storage  map[string]any
@@ -54,6 +56,9 @@ func (c *Crawler) Init() error {
 	}
 	if c.Delay == 0 {
 		c.Delay = DefaultDelay
+	}
+	if c.HttpClient == nil {
+		c.HttpClient = &http.Client{Timeout: DefaultTimeout}
 	}
 
 	_, _, err := mime.ParseMediaType(c.Mediatype)
@@ -104,7 +109,7 @@ func (c *Crawler) Visit(uri string) error {
 
 	<-c.ticker.C
 	infoLogger.Printf("Fetching url: %s", uri)
-	resp, err := http.Get(uri)
+	resp, err := c.HttpClient.Get(uri)
 	if resp != nil {
 		defer resp.Body.Close()
 	}
