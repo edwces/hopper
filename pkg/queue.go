@@ -2,23 +2,24 @@ package hopper
 
 import (
 	"container/heap"
+	"net/url"
 	"sync"
+	"time"
 )
+
+type Frontier interface {
+	Init(rawUrls ...string)
+	Push(uri string) error
+	Pop() *Item
+}
 
 type Item struct {
 	value    any
 	priority int
+	index    int
 }
 
 type PQueue []*Item
-
-// TODO: Improve Permormance
-type SafePQueue struct {
-	sync.RWMutex
-
-	done  bool
-	queue heap.Interface
-}
 
 // Len returns size of priority queue.
 func (pq PQueue) Len() int {
@@ -34,12 +35,23 @@ func (pq PQueue) Less(i, j int) bool {
 // Swap swaps heap items with indexes i, j.
 func (pq PQueue) Swap(i, j int) {
 	pq[i], pq[j] = pq[j], pq[i]
+	pq[i].index = i
+	pq[j].index = j
 }
 
 // Push appends an Item to the heap.
 func (pq *PQueue) Push(x any) {
+	n := len(*pq)
 	item := x.(*Item)
+	item.index = n
 	*pq = append(*pq, item)
+}
+
+// Update changes item priority and value.
+func (pq *PQueue) Update(item *Item, value any, priority int) {
+	item.value = value
+	item.priority = priority
+	heap.Fix(pq, item.index)
 }
 
 // Pop removes and returns item with a highest priority.
@@ -52,42 +64,75 @@ func (pq *PQueue) Pop() any {
 	return popped
 }
 
+func (pq *PQueue) Peek() any {
+	n := len(*pq)
+	full := *pq
+	return full[n-1]
+}
+
+type MemoryFrontier struct {
+	sync.RWMutex
+
+	hostQueue *PQueue
+	hostMap   map[string]*Item
+}
+
+type HostQueue struct {
+	lastReq time.Time
+
+	uriQueue *PQueue
+}
+
 // Init heapifies all items in queue.
-func (spq *SafePQueue) Init(items ...*Item) {
-	pq := PQueue{}
-	spq.done = false
-	copy(pq, items)
-	spq.queue = &pq
-	heap.Init(spq.queue)
-}
-
-func (spq *SafePQueue) IsDone() bool {
-	return spq.done
-}
-
-func (spq *SafePQueue) Done() {
-	spq.Lock()
-	spq.done = true
-	spq.Unlock()
+func (mf *MemoryFrontier) Init(rawUrls ...string) {
+	mf.hostQueue = &PQueue{}
+	heap.Init(mf.hostQueue)
+	for _, rawUrl := range rawUrls {
+		mf.Push(rawUrl)
+	}
 }
 
 // Push safely adds item to queue.
-func (spq *SafePQueue) Push(x *Item) {
-	spq.Lock()
-	defer spq.Unlock()
-	heap.Push(spq.queue, x)
+func (mf *MemoryFrontier) Push(rawUrl string) error {
+
+	uri, err := url.Parse(rawUrl)
+	if err != nil {
+		return err
+	}
+
+	mf.Lock()
+	defer mf.Unlock()
+	// check if hostQueue for given url exists
+	hostItem, exists := mf.hostMap[uri.Host]
+	if !exists {
+		uriQueue := &PQueue{}
+		heap.Init(uriQueue)
+		hostQueue := &HostQueue{uriQueue: uriQueue, lastReq: time.Now().Add(-DefaultDelay)}
+		hostItem = &Item{value: hostQueue, priority: 2}
+		heap.Push(mf.hostQueue, hostItem)
+	}
+
+	uriItem := &Item{value: rawUrl, priority: 1}
+	heap.Push(hostItem.value.(*HostQueue).uriQueue, uriItem)
+
+	return nil
 }
 
 // Pop returns and removes item with highest priority
-func (spq *SafePQueue) Pop() *Item {
-	spq.Lock()
-	defer spq.Unlock()
-	return heap.Pop(spq.queue).(*Item)
-}
+func (mf *MemoryFrontier) Pop() *Item {
+	mf.Lock()
+	hostItem := mf.hostQueue.Peek().(*Item)
+	hostQueue := hostItem.value.(*HostQueue)
+	mf.Unlock()
 
-// Len returns size of priority queue.
-func (spq *SafePQueue) Len() int {
-	spq.RLock()
-	defer spq.RUnlock()
-	return spq.queue.Len()
+	time.Sleep(time.Until(hostQueue.lastReq))
+
+	// update time of request
+	mf.Lock()
+	defer mf.Unlock()
+	hostQueue.lastReq = time.Now()
+	mf.hostQueue.Update(hostItem, hostItem.value, 1)
+
+	uriItem := heap.Pop(hostQueue.uriQueue)
+	return uriItem.(*Item)
 }
