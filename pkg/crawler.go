@@ -31,11 +31,9 @@ type Crawler struct {
 	Delay             time.Duration
 	Mediatype         string
 
-	frontier *SafePQueue
+	frontier *MemoryFrontier
 	storage  map[string]any
 	seenUrls map[string]bool
-
-	ticker *time.Ticker
 }
 
 // Init initializes default values for crawler.
@@ -59,11 +57,10 @@ func (c *Crawler) Init() error {
 		return err
 	}
 
-	c.frontier = &SafePQueue{}
+	c.frontier = &MemoryFrontier{}
 	c.frontier.Init()
 	c.storage = map[string]any{}
 	c.seenUrls = map[string]bool{}
-	c.ticker = time.NewTicker(c.Delay)
 
 	infoLogger.Printf("Crawler initialized succesfully")
 	return nil
@@ -73,18 +70,17 @@ func (c *Crawler) Init() error {
 func (c *Crawler) Crawl(seeds ...string) map[string]any {
 	for _, seed := range seeds {
 		c.seenUrls[seed] = true
-		c.frontier.Push(&Item{value: seed, priority: 1})
+		c.frontier.Push(seed)
 	}
 
 	for c.frontier.Len() != 0 {
-		c.Visit(c.frontier.Pop().value.(string))
+		c.Visit(c.frontier.Pop())
 	}
 
 	return c.storage
 }
 
 func (c *Crawler) Visit(uri string) error {
-	<-c.ticker.C
 	infoLogger.Printf("Fetching url: %s", uri)
 	resp, err := http.Get(uri)
 	if resp != nil {
@@ -123,9 +119,9 @@ func (c *Crawler) Visit(uri string) error {
 	dedupedUrls := dedup(filteredUrls)
 	unseenUrls := getUnseenUrls(dedupedUrls, c.seenUrls)
 
-	for _, url := range unseenUrls {
-		c.frontier.Push(&Item{value: url, priority: 1})
-		c.seenUrls[url] = true
+	for _, rawUrl := range unseenUrls {
+		c.frontier.Push(rawUrl)
+		c.seenUrls[rawUrl] = true
 	}
 
 	return nil
