@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"golang.org/x/net/html"
@@ -36,8 +35,6 @@ type Crawler struct {
 	storage  map[string]any
 	seenUrls map[string]bool
 
-	mut    sync.RWMutex
-	wg     sync.WaitGroup
 	ticker *time.Ticker
 }
 
@@ -67,7 +64,6 @@ func (c *Crawler) Init() error {
 	c.storage = map[string]any{}
 	c.seenUrls = map[string]bool{}
 	c.ticker = time.NewTicker(c.Delay)
-	c.wg = sync.WaitGroup{}
 
 	infoLogger.Printf("Crawler initialized succesfully")
 	return nil
@@ -75,33 +71,19 @@ func (c *Crawler) Init() error {
 
 // Crawl returns websites data accumulated by crawling over webpages
 func (c *Crawler) Crawl(seeds ...string) map[string]any {
-
 	for _, seed := range seeds {
 		c.seenUrls[seed] = true
-		c.wg.Add(1)
 		c.frontier.Push(&Item{value: seed, priority: 1})
 	}
 
-	go func() {
-		c.wg.Wait()
-		c.frontier.Done()
-	}()
-
-	// TODO: should probably be done with channels somehow which are linked to frontier
-	for {
-		if c.frontier.IsDone() {
-			break
-		}
-		if c.frontier.Len() != 0 {
-			go c.Visit(c.frontier.Pop().value.(string))
-		}
+	for c.frontier.Len() != 0 {
+		c.Visit(c.frontier.Pop().value.(string))
 	}
+
 	return c.storage
 }
 
 func (c *Crawler) Visit(uri string) error {
-	defer c.wg.Done()
-
 	<-c.ticker.C
 	infoLogger.Printf("Fetching url: %s", uri)
 	resp, err := http.Get(uri)
@@ -124,9 +106,7 @@ func (c *Crawler) Visit(uri string) error {
 	}
 
 	if mediatype == c.Mediatype {
-		c.mut.Lock()
 		c.storage[uri] = string(bytes)
-		c.mut.Unlock()
 	}
 	if mediatype != "text/html" {
 		return nil
@@ -144,12 +124,8 @@ func (c *Crawler) Visit(uri string) error {
 	unseenUrls := getUnseenUrls(dedupedUrls, c.seenUrls)
 
 	for _, url := range unseenUrls {
-		c.wg.Add(1)
 		c.frontier.Push(&Item{value: url, priority: 1})
-
-		c.mut.Lock()
 		c.seenUrls[url] = true
-		c.mut.Unlock()
 	}
 
 	return nil
