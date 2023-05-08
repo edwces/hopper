@@ -99,6 +99,24 @@ func (c *Crawler) Visit(uri string) error {
 		warningLogger.Printf("Could not return response for url: %s", uri)
 		return err
 	}
+
+	// handle redirects
+	if resp.StatusCode > 300 && resp.StatusCode < 400 {
+		infoLogger.Printf("Redirecting from url: %s", uri)
+		loc, err := resp.Location()
+		if err != nil {
+			return err
+		}
+		// handle infinite redirect
+		if loc.String() == uri {
+			warningLogger.Printf("Infinite redirect from url: %s", uri)
+			return errors.New("infinite redirect")
+		}
+		c.frontier.Push(loc.String())
+		c.seenUrls[loc.String()] = true
+		return nil
+	}
+
 	mediatype, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if mediatype != c.Mediatype && mediatype != "text/html" {
 		return nil
