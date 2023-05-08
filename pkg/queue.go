@@ -62,9 +62,65 @@ func (pq *PQueue) Peek() any {
 	return full[0]
 }
 
+type TimeItem struct {
+	value    any
+	priority time.Time
+	index    int
+}
+
+type TimeQueue []*TimeItem
+
+// Len returns size of priority queue.
+func (tq TimeQueue) Len() int {
+	return len(tq)
+}
+
+// Less returns true if Item with index j has lower priority than
+// Item with index i.
+func (tq TimeQueue) Less(i, j int) bool {
+	return tq[i].priority.Before(tq[j].priority)
+}
+
+// Swap swaps heap items with indexes i, j.
+func (tq TimeQueue) Swap(i, j int) {
+	tq[i], tq[j] = tq[j], tq[i]
+	tq[i].index = i
+	tq[j].index = j
+}
+
+// Push appends an Item to the heap.
+func (tq *TimeQueue) Push(x any) {
+	n := len(*tq)
+	item := x.(*TimeItem)
+	item.index = n
+	*tq = append(*tq, item)
+}
+
+// Update changes item priority and value.
+func (tq *TimeQueue) Update(item *TimeItem, value any, priority time.Time) {
+	item.value = value
+	item.priority = priority
+	heap.Fix(tq, item.index)
+}
+
+// Pop removes and returns item with a highest priority.
+func (tq *TimeQueue) Pop() any {
+	n := len(*tq)
+	full := *tq
+	popped := full[n-1]
+	full[n-1] = nil
+	*tq = full[:n-1]
+	return popped
+}
+
+func (tq *TimeQueue) Peek() any {
+	full := *tq
+	return full[0]
+}
+
 type MemoryFrontier struct {
-	hostQueue *PQueue
-	hostMap   map[string]*Item
+	hostQueue *TimeQueue
+	hostMap   map[string]*TimeItem
 	size      int
 }
 
@@ -76,8 +132,8 @@ type HostQueue struct {
 
 // Init heapifies all items in queue.
 func (mf *MemoryFrontier) Init(rawUrls ...string) {
-	mf.hostQueue = &PQueue{}
-	mf.hostMap = map[string]*Item{}
+	mf.hostQueue = &TimeQueue{}
+	mf.hostMap = map[string]*TimeItem{}
 	heap.Init(mf.hostQueue)
 	for _, rawUrl := range rawUrls {
 		mf.Push(rawUrl)
@@ -98,7 +154,7 @@ func (mf *MemoryFrontier) Push(rawUrl string) error {
 		uriQueue := &PQueue{}
 		heap.Init(uriQueue)
 		hostQueue := &HostQueue{uriQueue: uriQueue, lastReq: time.Now().Add(-DefaultDelay)}
-		hostItem = &Item{value: hostQueue, priority: 2}
+		hostItem = &TimeItem{value: hostQueue, priority: time.Now()}
 		heap.Push(mf.hostQueue, hostItem)
 		mf.hostMap[uri.Host] = hostItem
 	}
@@ -113,14 +169,14 @@ func (mf *MemoryFrontier) Push(rawUrl string) error {
 // Pop returns and removes item with highest priority.
 // It also waits the specified delay for given url host.
 func (mf *MemoryFrontier) Pop() string {
-	hostItem := mf.hostQueue.Peek().(*Item)
+	hostItem := mf.hostQueue.Peek().(*TimeItem)
 	hostQueue := hostItem.value.(*HostQueue)
 
 	time.Sleep(time.Until(hostQueue.lastReq.Add(DefaultDelay)))
 
 	// update time of request
 	hostQueue.lastReq = time.Now()
-	mf.hostQueue.Update(hostItem, hostItem.value, 1)
+	mf.hostQueue.Update(hostItem, hostItem.value, time.Now().Add(DefaultDelay))
 
 	uriItem := heap.Pop(hostQueue.uriQueue)
 	mf.size--

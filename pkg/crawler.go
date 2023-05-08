@@ -21,7 +21,7 @@ var (
 )
 
 const (
-	DefaultDelay    = time.Second
+	DefaultDelay    = time.Second * 10
 	DefaulMediatype = "text/html"
 )
 
