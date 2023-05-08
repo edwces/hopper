@@ -9,21 +9,21 @@ import (
 	"net/url"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"golang.org/x/net/html"
 )
 
 var (
+	DefaultClient = http.DefaultClient
+
 	infoLogger    = log.New(os.Stdout, "[INFO]: ", log.LstdFlags)
 	warningLogger = log.New(os.Stdout, "[WARN]: ", log.LstdFlags)
 	errorLogger   = log.New(os.Stdout, "[ERROR]: ", log.LstdFlags)
 )
 
 const (
-	DefaultDelay    = time.Second
-	DefaultTimeout  = time.Second * 5
+	DefaultDelay    = time.Second * 10
 	DefaulMediatype = "text/html"
 )
 
@@ -32,15 +32,11 @@ type Crawler struct {
 	DisallowedDomains []string
 	Delay             time.Duration
 	Mediatype         string
-	HttpClient        *http.Client
+	Client            *http.Client
 
-	frontier *SafePQueue
+	frontier *MemoryFrontier
 	storage  map[string]any
 	seenUrls map[string]bool
-
-	mut    sync.RWMutex
-	wg     sync.WaitGroup
-	ticker *time.Ticker
 }
 
 // Init initializes default values for crawler.
@@ -57,22 +53,23 @@ func (c *Crawler) Init() error {
 	if c.Delay == 0 {
 		c.Delay = DefaultDelay
 	}
-	if c.HttpClient == nil {
-		c.HttpClient = &http.Client{Timeout: DefaultTimeout}
+	if c.Client == nil {
+		c.Client = DefaultClient
+		c.Client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
 	}
 
 	_, _, err := mime.ParseMediaType(c.Mediatype)
 	if err != nil {
-		errorLogger.Printf("Invalid mime type")
+		errorLogger.Fatal("Invalid mime type")
 		return err
 	}
 
-	c.frontier = &SafePQueue{}
+	c.frontier = &MemoryFrontier{Delay: c.Delay}
 	c.frontier.Init()
 	c.storage = map[string]any{}
 	c.seenUrls = map[string]bool{}
-	c.ticker = time.NewTicker(c.Delay)
-	c.wg = sync.WaitGroup{}
 
 	infoLogger.Printf("Crawler initialized succesfully")
 	return nil
@@ -80,36 +77,21 @@ func (c *Crawler) Init() error {
 
 // Crawl returns websites data accumulated by crawling over webpages
 func (c *Crawler) Crawl(seeds ...string) map[string]any {
-
 	for _, seed := range seeds {
 		c.seenUrls[seed] = true
-		c.wg.Add(1)
-		c.frontier.Push(&Item{value: seed, priority: 1})
+		c.frontier.Push(seed)
 	}
 
-	go func() {
-		c.wg.Wait()
-		c.frontier.Done()
-	}()
-
-	// TODO: should probably be done with channels somehow which are linked to frontier
-	for {
-		if c.frontier.IsDone() {
-			break
-		}
-		if c.frontier.Len() != 0 {
-			go c.Visit(c.frontier.Pop().value.(string))
-		}
+	for c.frontier.Len() != 0 {
+		c.Visit(c.frontier.Pop())
 	}
+
 	return c.storage
 }
 
 func (c *Crawler) Visit(uri string) error {
-	defer c.wg.Done()
-
-	<-c.ticker.C
 	infoLogger.Printf("Fetching url: %s", uri)
-	resp, err := c.HttpClient.Get(uri)
+	resp, err := c.Client.Get(uri)
 	if resp != nil {
 		defer resp.Body.Close()
 	}
@@ -117,6 +99,24 @@ func (c *Crawler) Visit(uri string) error {
 		warningLogger.Printf("Could not return response for url: %s", uri)
 		return err
 	}
+
+	// handle redirects
+	if resp.StatusCode > 300 && resp.StatusCode < 400 {
+		infoLogger.Printf("Redirecting from url: %s", uri)
+		loc, err := resp.Location()
+		if err != nil {
+			return err
+		}
+		// handle infinite redirect
+		if loc.String() == uri {
+			warningLogger.Printf("Infinite redirect from url: %s", uri)
+			return errors.New("infinite redirect")
+		}
+		c.frontier.Push(loc.String())
+		c.seenUrls[loc.String()] = true
+		return nil
+	}
+
 	mediatype, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if mediatype != c.Mediatype && mediatype != "text/html" {
 		return nil
@@ -129,9 +129,7 @@ func (c *Crawler) Visit(uri string) error {
 	}
 
 	if mediatype == c.Mediatype {
-		c.mut.Lock()
 		c.storage[uri] = string(bytes)
-		c.mut.Unlock()
 	}
 	if mediatype != "text/html" {
 		return nil
@@ -148,13 +146,9 @@ func (c *Crawler) Visit(uri string) error {
 	dedupedUrls := dedup(filteredUrls)
 	unseenUrls := getUnseenUrls(dedupedUrls, c.seenUrls)
 
-	for _, url := range unseenUrls {
-		c.wg.Add(1)
-		c.frontier.Push(&Item{value: url, priority: 1})
-
-		c.mut.Lock()
-		c.seenUrls[url] = true
-		c.mut.Unlock()
+	for _, rawUrl := range unseenUrls {
+		c.frontier.Push(rawUrl)
+		c.seenUrls[rawUrl] = true
 	}
 
 	return nil

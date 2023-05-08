@@ -6,9 +6,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
-func NewMockServer() (*httptest.Server, error) {
+const DefaultTestDelay = time.Millisecond * 100
+
+func NewMockServer(port int) (*httptest.Server, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -54,9 +57,28 @@ func NewMockServer() (*httptest.Server, error) {
 		w.Header().Set("Content-Type", "plain/text")
 		fmt.Fprint(w, "Hello Mars")
 	})
+	mux.HandleFunc("/cross", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<html>
+							<head>
+								<title>Link2 Page</title>
+							</head>
+							<body>
+								<h1>hsdhdjhshjdh</h1>
+								<a href="http://127.0.0.1:8081/link1"></a>
+								<a href="http://127.0.0.1:8081/link2"></a>
+								<a href="/link1"></a>
+								<a href="/link2"></a>
+							</body>
+						</html>`))
+	})
+	mux.HandleFunc("/redirect", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "http://127.0.0.1:8080/link1", http.StatusMovedPermanently)
+	})
 
 	server := httptest.NewUnstartedServer(mux)
-	l, err := net.Listen("tcp", "127.0.0.1:8080")
+	host := fmt.Sprintf("127.0.0.1:%d", port)
+	l, err := net.Listen("tcp", host)
 	if err != nil {
 		return server, err
 	}
@@ -65,14 +87,14 @@ func NewMockServer() (*httptest.Server, error) {
 }
 
 func TestCrawl(t *testing.T) {
-	server, err := NewMockServer()
+	server, err := NewMockServer(8080)
 	if err != nil {
 		t.Fatalf("Server could not be started")
 	}
 	server.Start()
 	defer server.Close()
 
-	crawler := Crawler{}
+	crawler := Crawler{Delay: DefaultTestDelay}
 	crawler.Init()
 	results := crawler.Crawl("http://127.0.0.1:8080/")
 	if len(results) != 3 {
@@ -81,14 +103,14 @@ func TestCrawl(t *testing.T) {
 }
 
 func TestCrawlMime(t *testing.T) {
-	server, err := NewMockServer()
+	server, err := NewMockServer(8080)
 	if err != nil {
 		t.Fatalf("Server could not be started")
 	}
 	server.Start()
 	defer server.Close()
 
-	crawler := Crawler{Mediatype: "plain/text"}
+	crawler := Crawler{Mediatype: "plain/text", Delay: DefaultTestDelay}
 	crawler.Init()
 	results := crawler.Crawl("http://127.0.0.1:8080/")
 	if len(results) != 1 {
@@ -97,8 +119,49 @@ func TestCrawlMime(t *testing.T) {
 
 }
 
+func TestCrawlCross(t *testing.T) {
+	server1, err := NewMockServer(8080)
+	if err != nil {
+		t.Fatalf("Server could not be started")
+	}
+	server2, err := NewMockServer(8081)
+	if err != nil {
+		t.Fatalf("Server could not be started")
+	}
+
+	server1.Start()
+	defer server1.Close()
+	server2.Start()
+	defer server2.Close()
+
+	crawler := Crawler{Delay: DefaultTestDelay}
+	crawler.Init()
+	results := crawler.Crawl("http://127.0.0.1:8080/cross")
+
+	if len(results) != 5 {
+		t.Errorf("Incorrect length of results: got %d, expected: %d", len(results), 5)
+	}
+}
+
+func TestCrawlRedirect(t *testing.T) {
+	server1, err := NewMockServer(8080)
+	if err != nil {
+		t.Fatalf("Server could not be started")
+	}
+	server1.Start()
+	defer server1.Close()
+
+	crawler := Crawler{Delay: DefaultTestDelay}
+	crawler.Init()
+	results := crawler.Crawl("http://127.0.0.1:8080/redirect")
+
+	if len(results) != 2 {
+		t.Errorf("Incorrect length of results: got %d, expected: %d", len(results), 2)
+	}
+}
+
 func BenchmarkCrawl(b *testing.B) {
-	server, err := NewMockServer()
+	server, err := NewMockServer(8080)
 	if err != nil {
 		b.Fatalf("Server could not be started")
 	}
