@@ -62,11 +62,11 @@ func (c *Crawler) Init() error {
 
 	_, _, err := mime.ParseMediaType(c.Mediatype)
 	if err != nil {
-		errorLogger.Printf("Invalid mime type")
+		errorLogger.Fatal("Invalid mime type")
 		return err
 	}
 
-	c.frontier = &MemoryFrontier{}
+	c.frontier = &MemoryFrontier{Delay: c.Delay}
 	c.frontier.Init()
 	c.storage = map[string]any{}
 	c.seenUrls = map[string]bool{}

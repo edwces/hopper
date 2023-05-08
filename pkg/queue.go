@@ -119,6 +119,8 @@ func (tq *TimeQueue) Peek() any {
 }
 
 type MemoryFrontier struct {
+	Delay time.Duration
+
 	hostQueue *TimeQueue
 	hostMap   map[string]*TimeItem
 	size      int
@@ -132,6 +134,10 @@ type HostQueue struct {
 
 // Init heapifies all items in queue.
 func (mf *MemoryFrontier) Init(rawUrls ...string) {
+	if mf.Delay == 0 {
+		errorLogger.Fatal("frontier delay has not been specified")
+	}
+
 	mf.hostQueue = &TimeQueue{}
 	mf.hostMap = map[string]*TimeItem{}
 	heap.Init(mf.hostQueue)
@@ -153,7 +159,7 @@ func (mf *MemoryFrontier) Push(rawUrl string) error {
 	if !exists {
 		uriQueue := &PQueue{}
 		heap.Init(uriQueue)
-		hostQueue := &HostQueue{uriQueue: uriQueue, lastReq: time.Now().Add(-DefaultDelay)}
+		hostQueue := &HostQueue{uriQueue: uriQueue, lastReq: time.Now().Add(-mf.Delay)}
 		hostItem = &TimeItem{value: hostQueue, priority: time.Now()}
 		heap.Push(mf.hostQueue, hostItem)
 		mf.hostMap[uri.Host] = hostItem
@@ -172,11 +178,11 @@ func (mf *MemoryFrontier) Pop() string {
 	hostItem := mf.hostQueue.Peek().(*TimeItem)
 	hostQueue := hostItem.value.(*HostQueue)
 
-	time.Sleep(time.Until(hostQueue.lastReq.Add(DefaultDelay)))
+	time.Sleep(time.Until(hostQueue.lastReq.Add(mf.Delay)))
 
 	// update time of request
 	hostQueue.lastReq = time.Now()
-	mf.hostQueue.Update(hostItem, hostItem.value, time.Now().Add(DefaultDelay))
+	mf.hostQueue.Update(hostItem, hostItem.value, time.Now().Add(mf.Delay))
 
 	uriItem := heap.Pop(hostQueue.uriQueue)
 	mf.size--
