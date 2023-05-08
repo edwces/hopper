@@ -15,6 +15,8 @@ import (
 )
 
 var (
+	DefaultClient = http.DefaultClient
+
 	infoLogger    = log.New(os.Stdout, "[INFO]: ", log.LstdFlags)
 	warningLogger = log.New(os.Stdout, "[WARN]: ", log.LstdFlags)
 	errorLogger   = log.New(os.Stdout, "[ERROR]: ", log.LstdFlags)
@@ -30,6 +32,7 @@ type Crawler struct {
 	DisallowedDomains []string
 	Delay             time.Duration
 	Mediatype         string
+	Client            *http.Client
 
 	frontier *MemoryFrontier
 	storage  map[string]any
@@ -49,6 +52,12 @@ func (c *Crawler) Init() error {
 	}
 	if c.Delay == 0 {
 		c.Delay = DefaultDelay
+	}
+	if c.Client == nil {
+		c.Client = DefaultClient
+		c.Client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
 	}
 
 	_, _, err := mime.ParseMediaType(c.Mediatype)
@@ -82,7 +91,7 @@ func (c *Crawler) Crawl(seeds ...string) map[string]any {
 
 func (c *Crawler) Visit(uri string) error {
 	infoLogger.Printf("Fetching url: %s", uri)
-	resp, err := http.Get(uri)
+	resp, err := c.Client.Get(uri)
 	if resp != nil {
 		defer resp.Body.Close()
 	}
