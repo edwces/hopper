@@ -90,6 +90,23 @@ func (c *Crawler) Crawl(seeds ...string) map[string]any {
 }
 
 func (c *Crawler) Visit(uri string) error {
+	infoLogger.Printf("Requesting headers for url: %s", uri)
+
+	// check mimetype before so we don't need to download full body
+	headResp, err := c.Client.Head(uri)
+	if headResp != nil {
+		defer headResp.Body.Close()
+	}
+	if err != nil {
+		warningLogger.Printf("Could not return response for url: %s", uri)
+		return err
+	}
+
+	mediatype, _, _ := mime.ParseMediaType(headResp.Header.Get("Content-Type"))
+	if mediatype != c.Mediatype && mediatype != "text/html" {
+		return nil
+	}
+
 	infoLogger.Printf("Fetching url: %s", uri)
 	resp, err := c.Client.Get(uri)
 	if resp != nil {
@@ -114,11 +131,6 @@ func (c *Crawler) Visit(uri string) error {
 		}
 		c.frontier.Push(loc.String())
 		c.seenUrls[loc.String()] = true
-		return nil
-	}
-
-	mediatype, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-	if mediatype != c.Mediatype && mediatype != "text/html" {
 		return nil
 	}
 
