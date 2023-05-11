@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/temoto/robotstxt"
 	"golang.org/x/net/html"
 )
 
@@ -34,9 +35,10 @@ type Crawler struct {
 	Client            *http.Client
 	UserAgent         string
 
-	frontier *MemoryFrontier
-	storage  map[string]any
-	seenUrls map[string]bool
+	frontier  *MemoryFrontier
+	storage   map[string]any
+	seenUrls  map[string]bool
+	robotsMap map[string]*robotstxt.RobotsData
 }
 
 // Init initializes default values for crawler.
@@ -73,6 +75,7 @@ func (c *Crawler) Init() error {
 	c.frontier.Init()
 	c.storage = map[string]any{}
 	c.seenUrls = map[string]bool{}
+	c.robotsMap = map[string]*robotstxt.RobotsData{}
 
 	infoLogger.Printf("Crawler initialized succesfully")
 	return nil
@@ -101,18 +104,55 @@ func (c *Crawler) newRequest(method, rawUrl string) *http.Request {
 	return req
 }
 
-func (c *Crawler) Visit(uri string) error {
-	infoLogger.Printf("Requesting headers for url: %s", uri)
+func (c *Crawler) fetchRobotsTxt(uri url.URL) (*robotstxt.RobotsData, error) {
+	if c.robotsMap[uri.Host] == nil {
+		infoLogger.Printf("Fetching robots.txt for host: %s", uri.Host)
+		uri.Path = "/robots.txt"
+		req := c.newRequest("GET", uri.String())
+		resp, err := c.Client.Do(req)
+		if resp != nil {
+			defer resp.Body.Close()
+		}
+		if err != nil {
+			return nil, err
+		}
+		robots, err := robotstxt.FromResponse(resp)
+		if err != nil {
+			return nil, err
+		}
+		c.robotsMap[uri.Host] = robots
+	}
+
+	robots := c.robotsMap[uri.Host]
+	return robots, nil
+}
+
+func (c *Crawler) Visit(rawUrl string) error {
+	uri, err := url.Parse(rawUrl)
+	if err != nil {
+		errorLogger.Fatalf("Could not parse uri: %s", uri.String())
+	}
+
+	// check robots.txt exclusion
+	robots, err := c.fetchRobotsTxt(*uri)
+	if err != nil {
+		warningLogger.Printf("Could not fetch robots.txt for url: %s", uri.String())
+	}
+	agentGroup := robots.FindGroup(c.UserAgent)
+	if !agentGroup.Test(uri.EscapedPath()) {
+		warningLogger.Printf("Robots.txt exclusion for url: %s", uri.String())
+		return errors.New("robots.txt exclusion")
+	}
 
 	// check mimetype before so we don't need to download full body
-	infoLogger.Printf("Requesting headers for url: %s", uri)
-	req := c.newRequest("HEAD", uri)
+	infoLogger.Printf("Requesting headers for url: %s", uri.String())
+	req := c.newRequest("HEAD", uri.String())
 	headResp, err := c.Client.Do(req)
 	if headResp != nil {
 		defer headResp.Body.Close()
 	}
 	if err != nil {
-		warningLogger.Printf("Could not return response for url: %s", uri)
+		warningLogger.Printf("Could not return response for url: %s", uri.String())
 		return err
 	}
 
@@ -121,8 +161,8 @@ func (c *Crawler) Visit(uri string) error {
 		return nil
 	}
 
-	infoLogger.Printf("Fetching url: %s", uri)
-	req = c.newRequest("GET", uri)
+	infoLogger.Printf("Fetching url: %s", uri.String())
+	req = c.newRequest("GET", uri.String())
 	resp, err := c.Client.Do(req)
 	if resp != nil {
 		defer resp.Body.Close()
@@ -140,7 +180,7 @@ func (c *Crawler) Visit(uri string) error {
 			return err
 		}
 		// handle infinite redirect
-		if loc.String() == uri {
+		if loc.String() == uri.String() {
 			warningLogger.Printf("Infinite redirect from url: %s", uri)
 			return errors.New("infinite redirect")
 		}
@@ -156,7 +196,7 @@ func (c *Crawler) Visit(uri string) error {
 	}
 
 	if mediatype == c.Mediatype {
-		c.storage[uri] = string(bytes)
+		c.storage[uri.String()] = string(bytes)
 	}
 	if mediatype != "text/html" {
 		return nil
@@ -168,6 +208,7 @@ func (c *Crawler) Visit(uri string) error {
 		return err
 	}
 
+	// TODO: Maybe filter via robots.txt here ?
 	extractedUrls := extractUrls(doc, uri)
 	filteredUrls := filterUrls(extractedUrls, c.AllowedDomains, c.DisallowedDomains)
 	dedupedUrls := dedup(filteredUrls)
@@ -182,7 +223,7 @@ func (c *Crawler) Visit(uri string) error {
 }
 
 // extractUrls returns all urls extracted from given node tree
-func extractUrls(node *html.Node, uri string) []string {
+func extractUrls(node *html.Node, uri *url.URL) []string {
 	extractedUrls := []string{}
 	searchNode(node, func(node *html.Node) {
 		if node.Type == html.ElementNode && node.Data == "a" {
@@ -267,16 +308,12 @@ func getUnseenUrls(urls []string, seenUrls map[string]bool) []string {
 }
 
 // normalizeUrl returns normalized version of the urlProccessed passed.
-func normalizeUrl(rawUrl string, rawBaseUrl string) (string, error) {
-	baseUrl, err := url.Parse(rawBaseUrl)
+func normalizeUrl(ref string, uri *url.URL) (string, error) {
+	refUrl, err := url.Parse(ref)
 	if err != nil {
 		return "", err
 	}
-	refUrl, err := url.Parse(rawUrl)
-	if err != nil {
-		return "", err
-	}
-	normalizedUrl := baseUrl.ResolveReference(refUrl)
+	normalizedUrl := uri.ResolveReference(refUrl)
 	if normalizedUrl.Scheme != "http" && normalizedUrl.Scheme != "https" {
 		return "", errors.New("unsupported protocol")
 	}
