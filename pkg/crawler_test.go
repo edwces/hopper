@@ -160,6 +160,16 @@ func TestCrawlRedirect(t *testing.T) {
 	}
 }
 
+func TestCrawlRequestUserAgent(t *testing.T) {
+	crawler := Crawler{Delay: DefaultTestDelay}
+	crawler.Init()
+	req := crawler.newRequest("GET", "http://127.0.0.1:8080/")
+	userAgent := req.Header.Get("User-Agent")
+	if userAgent != DefaultUserAgent {
+		t.Errorf("Incorrect user-agent header set: got %s, expected %s", userAgent, DefaultUserAgent)
+	}
+}
+
 func BenchmarkCrawl(b *testing.B) {
 	server, err := NewMockServer(8080)
 	if err != nil {

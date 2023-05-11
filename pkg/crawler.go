@@ -15,16 +15,15 @@ import (
 )
 
 var (
-	DefaultClient = http.DefaultClient
-
 	infoLogger    = log.New(os.Stdout, "[INFO]: ", log.LstdFlags)
 	warningLogger = log.New(os.Stdout, "[WARN]: ", log.LstdFlags)
 	errorLogger   = log.New(os.Stdout, "[ERROR]: ", log.LstdFlags)
 )
 
 const (
-	DefaultDelay    = time.Second * 10
-	DefaulMediatype = "text/html"
+	DefaultDelay     = time.Second * 10
+	DefaulMediatype  = "text/html"
+	DefaultUserAgent = "hopper (https://github.com/edwces/hopper)"
 )
 
 type Crawler struct {
@@ -33,6 +32,7 @@ type Crawler struct {
 	Delay             time.Duration
 	Mediatype         string
 	Client            *http.Client
+	UserAgent         string
 
 	frontier *MemoryFrontier
 	storage  map[string]any
@@ -53,8 +53,11 @@ func (c *Crawler) Init() error {
 	if c.Delay == 0 {
 		c.Delay = DefaultDelay
 	}
+	if c.UserAgent == "" {
+		c.UserAgent = DefaultUserAgent
+	}
 	if c.Client == nil {
-		c.Client = DefaultClient
+		c.Client = http.DefaultClient
 		c.Client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		}
@@ -89,11 +92,22 @@ func (c *Crawler) Crawl(seeds ...string) map[string]any {
 	return c.storage
 }
 
+func (c *Crawler) newRequest(method, rawUrl string) *http.Request {
+	req, err := http.NewRequest(method, rawUrl, nil)
+	if err != nil {
+		errorLogger.Fatalf("Invalid request: %s %s", method, rawUrl)
+	}
+	req.Header.Set("User-Agent", c.UserAgent)
+	return req
+}
+
 func (c *Crawler) Visit(uri string) error {
 	infoLogger.Printf("Requesting headers for url: %s", uri)
 
 	// check mimetype before so we don't need to download full body
-	headResp, err := c.Client.Head(uri)
+	infoLogger.Printf("Requesting headers for url: %s", uri)
+	req := c.newRequest("HEAD", uri)
+	headResp, err := c.Client.Do(req)
 	if headResp != nil {
 		defer headResp.Body.Close()
 	}
@@ -108,7 +122,8 @@ func (c *Crawler) Visit(uri string) error {
 	}
 
 	infoLogger.Printf("Fetching url: %s", uri)
-	resp, err := c.Client.Get(uri)
+	req = c.newRequest("GET", uri)
+	resp, err := c.Client.Do(req)
 	if resp != nil {
 		defer resp.Body.Close()
 	}
