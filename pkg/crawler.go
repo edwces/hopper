@@ -121,6 +121,8 @@ func (c *Crawler) fetchRobotsTxt(uri url.URL) (*robotstxt.RobotsData, error) {
 			return nil, err
 		}
 		c.robotsMap[uri.Host] = robots
+		agentGroup := robots.FindGroup(c.UserAgent)
+		c.frontier.Update(uri.Host, agentGroup.CrawlDelay)
 	}
 
 	robots := c.robotsMap[uri.Host]
