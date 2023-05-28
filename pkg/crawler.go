@@ -11,20 +11,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/temoto/robotstxt"
 	"golang.org/x/net/html"
 )
 
 var (
-	DefaultClient = http.DefaultClient
-
 	infoLogger    = log.New(os.Stdout, "[INFO]: ", log.LstdFlags)
 	warningLogger = log.New(os.Stdout, "[WARN]: ", log.LstdFlags)
 	errorLogger   = log.New(os.Stdout, "[ERROR]: ", log.LstdFlags)
 )
 
 const (
-	DefaultDelay    = time.Second * 10
-	DefaulMediatype = "text/html"
+	DefaultDelay     = time.Second * 10
+	DefaulMediatype  = "text/html"
+	DefaultUserAgent = "hopper (https://github.com/edwces/hopper)"
 )
 
 type Crawler struct {
@@ -33,10 +33,12 @@ type Crawler struct {
 	Delay             time.Duration
 	Mediatype         string
 	Client            *http.Client
+	UserAgent         string
 
-	frontier *MemoryFrontier
-	storage  map[string]any
-	seenUrls map[string]bool
+	frontier  *MemoryFrontier
+	storage   map[string]any
+	seenUrls  map[string]bool
+	robotsMap map[string]*robotstxt.RobotsData
 }
 
 // Init initializes default values for crawler.
@@ -53,8 +55,11 @@ func (c *Crawler) Init() error {
 	if c.Delay == 0 {
 		c.Delay = DefaultDelay
 	}
+	if c.UserAgent == "" {
+		c.UserAgent = DefaultUserAgent
+	}
 	if c.Client == nil {
-		c.Client = DefaultClient
+		c.Client = http.DefaultClient
 		c.Client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		}
@@ -70,6 +75,7 @@ func (c *Crawler) Init() error {
 	c.frontier.Init()
 	c.storage = map[string]any{}
 	c.seenUrls = map[string]bool{}
+	c.robotsMap = map[string]*robotstxt.RobotsData{}
 
 	infoLogger.Printf("Crawler initialized succesfully")
 	return nil
@@ -89,9 +95,77 @@ func (c *Crawler) Crawl(seeds ...string) map[string]any {
 	return c.storage
 }
 
-func (c *Crawler) Visit(uri string) error {
-	infoLogger.Printf("Fetching url: %s", uri)
-	resp, err := c.Client.Get(uri)
+func (c *Crawler) newRequest(method, rawUrl string) *http.Request {
+	req, err := http.NewRequest(method, rawUrl, nil)
+	if err != nil {
+		errorLogger.Fatalf("Invalid request: %s %s", method, rawUrl)
+	}
+	req.Header.Set("User-Agent", c.UserAgent)
+	return req
+}
+
+func (c *Crawler) fetchRobotsTxt(uri url.URL) (*robotstxt.RobotsData, error) {
+	if c.robotsMap[uri.Host] == nil {
+		infoLogger.Printf("Fetching robots.txt for host: %s", uri.Host)
+		uri.Path = "/robots.txt"
+		req := c.newRequest("GET", uri.String())
+		resp, err := c.Client.Do(req)
+		if resp != nil {
+			defer resp.Body.Close()
+		}
+		if err != nil {
+			return nil, err
+		}
+		robots, err := robotstxt.FromResponse(resp)
+		if err != nil {
+			return nil, err
+		}
+		c.robotsMap[uri.Host] = robots
+		agentGroup := robots.FindGroup(c.UserAgent)
+		c.frontier.Update(uri.Host, agentGroup.CrawlDelay)
+	}
+
+	robots := c.robotsMap[uri.Host]
+	return robots, nil
+}
+
+func (c *Crawler) Visit(rawUrl string) error {
+	uri, err := url.Parse(rawUrl)
+	if err != nil {
+		errorLogger.Fatalf("Could not parse uri: %s", uri.String())
+	}
+
+	// check robots.txt exclusion
+	robots, err := c.fetchRobotsTxt(*uri)
+	if err != nil {
+		warningLogger.Printf("Could not fetch robots.txt for url: %s", uri.String())
+	}
+	agentGroup := robots.FindGroup(c.UserAgent)
+	if !agentGroup.Test(uri.EscapedPath()) {
+		warningLogger.Printf("Robots.txt exclusion for url: %s", uri.String())
+		return errors.New("robots.txt exclusion")
+	}
+
+	// check mimetype before so we don't need to download full body
+	infoLogger.Printf("Requesting headers for url: %s", uri.String())
+	req := c.newRequest("HEAD", uri.String())
+	headResp, err := c.Client.Do(req)
+	if headResp != nil {
+		defer headResp.Body.Close()
+	}
+	if err != nil {
+		warningLogger.Printf("Could not return response for url: %s", uri.String())
+		return err
+	}
+
+	mediatype, _, _ := mime.ParseMediaType(headResp.Header.Get("Content-Type"))
+	if mediatype != c.Mediatype && mediatype != "text/html" {
+		return nil
+	}
+
+	infoLogger.Printf("Fetching url: %s", uri.String())
+	req = c.newRequest("GET", uri.String())
+	resp, err := c.Client.Do(req)
 	if resp != nil {
 		defer resp.Body.Close()
 	}
@@ -108,17 +182,12 @@ func (c *Crawler) Visit(uri string) error {
 			return err
 		}
 		// handle infinite redirect
-		if loc.String() == uri {
+		if loc.String() == uri.String() {
 			warningLogger.Printf("Infinite redirect from url: %s", uri)
 			return errors.New("infinite redirect")
 		}
 		c.frontier.Push(loc.String())
 		c.seenUrls[loc.String()] = true
-		return nil
-	}
-
-	mediatype, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-	if mediatype != c.Mediatype && mediatype != "text/html" {
 		return nil
 	}
 
@@ -129,7 +198,7 @@ func (c *Crawler) Visit(uri string) error {
 	}
 
 	if mediatype == c.Mediatype {
-		c.storage[uri] = string(bytes)
+		c.storage[uri.String()] = string(bytes)
 	}
 	if mediatype != "text/html" {
 		return nil
@@ -141,6 +210,7 @@ func (c *Crawler) Visit(uri string) error {
 		return err
 	}
 
+	// TODO: Maybe filter via robots.txt here ?
 	extractedUrls := extractUrls(doc, uri)
 	filteredUrls := filterUrls(extractedUrls, c.AllowedDomains, c.DisallowedDomains)
 	dedupedUrls := dedup(filteredUrls)
@@ -155,7 +225,7 @@ func (c *Crawler) Visit(uri string) error {
 }
 
 // extractUrls returns all urls extracted from given node tree
-func extractUrls(node *html.Node, uri string) []string {
+func extractUrls(node *html.Node, uri *url.URL) []string {
 	extractedUrls := []string{}
 	searchNode(node, func(node *html.Node) {
 		if node.Type == html.ElementNode && node.Data == "a" {
@@ -240,16 +310,12 @@ func getUnseenUrls(urls []string, seenUrls map[string]bool) []string {
 }
 
 // normalizeUrl returns normalized version of the urlProccessed passed.
-func normalizeUrl(rawUrl string, rawBaseUrl string) (string, error) {
-	baseUrl, err := url.Parse(rawBaseUrl)
+func normalizeUrl(ref string, uri *url.URL) (string, error) {
+	refUrl, err := url.Parse(ref)
 	if err != nil {
 		return "", err
 	}
-	refUrl, err := url.Parse(rawUrl)
-	if err != nil {
-		return "", err
-	}
-	normalizedUrl := baseUrl.ResolveReference(refUrl)
+	normalizedUrl := uri.ResolveReference(refUrl)
 	if normalizedUrl.Scheme != "http" && normalizedUrl.Scheme != "https" {
 		return "", errors.New("unsupported protocol")
 	}

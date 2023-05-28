@@ -54,7 +54,7 @@ func NewMockServer(port int) (*httptest.Server, error) {
 						</html>`))
 	})
 	mux.HandleFunc("/mime", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "plain/text")
+		w.Header().Set("Content-Type", "text/plain")
 		fmt.Fprint(w, "Hello Mars")
 	})
 	mux.HandleFunc("/cross", func(w http.ResponseWriter, r *http.Request) {
@@ -74,6 +74,49 @@ func NewMockServer(port int) (*httptest.Server, error) {
 	})
 	mux.HandleFunc("/redirect", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "http://127.0.0.1:8080/link1", http.StatusMovedPermanently)
+	})
+	mux.HandleFunc("/robots.txt", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-type", "text/plain")
+		w.Write([]byte(`User-Agent: *
+						Disallow: /excluded1
+						Disallow: /excluded2
+		`))
+	})
+	mux.HandleFunc("/excluded1", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<html>
+							<head>
+								<title>Secret Page1</title>
+							</head>
+							<body>
+								<h1>hsdhdjhshjdh</h1>
+							</body>
+						</html>`))
+	})
+	mux.HandleFunc("/excluded2", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<html>
+							<head>
+								<title>Secret Page2</title>
+							</head>
+							<body>
+								<h1>hsdhdjhshjdh</h1>
+							</body>
+						</html>`))
+	})
+	mux.HandleFunc("/robot", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<html>
+							<head>
+								<title>Secret Page2</title>
+							</head>
+							<body>
+								<h1>hsdhdjhshjdh</h1>
+								<a href="/excluded1"></a>
+								<a href="/link1"></a>
+								<a href="/excluded2"></a>
+							</body>
+						</html>`))
 	})
 
 	server := httptest.NewUnstartedServer(mux)
@@ -110,7 +153,7 @@ func TestCrawlMime(t *testing.T) {
 	server.Start()
 	defer server.Close()
 
-	crawler := Crawler{Mediatype: "plain/text", Delay: DefaultTestDelay}
+	crawler := Crawler{Mediatype: "text/plain", Delay: DefaultTestDelay}
 	crawler.Init()
 	results := crawler.Crawl("http://127.0.0.1:8080/")
 	if len(results) != 1 {
@@ -143,6 +186,22 @@ func TestCrawlCross(t *testing.T) {
 	}
 }
 
+func TestCrawlRobotsTxt(t *testing.T) {
+	server1, err := NewMockServer(8080)
+	if err != nil {
+		t.Fatalf("Server could not be started")
+	}
+	server1.Start()
+	defer server1.Close()
+
+	crawler := Crawler{Delay: DefaultTestDelay}
+	crawler.Init()
+	results := crawler.Crawl("http://127.0.0.1:8080/robot")
+	if len(results) != 3 {
+		t.Errorf("Incorrect length of results: got %d, expected: %d", len(results), 3)
+	}
+}
+
 func TestCrawlRedirect(t *testing.T) {
 	server1, err := NewMockServer(8080)
 	if err != nil {
@@ -157,6 +216,16 @@ func TestCrawlRedirect(t *testing.T) {
 
 	if len(results) != 2 {
 		t.Errorf("Incorrect length of results: got %d, expected: %d", len(results), 2)
+	}
+}
+
+func TestCrawlRequestUserAgent(t *testing.T) {
+	crawler := Crawler{Delay: DefaultTestDelay}
+	crawler.Init()
+	req := crawler.newRequest("GET", "http://127.0.0.1:8080/")
+	userAgent := req.Header.Get("User-Agent")
+	if userAgent != DefaultUserAgent {
+		t.Errorf("Incorrect user-agent header set: got %s, expected %s", userAgent, DefaultUserAgent)
 	}
 }
 
