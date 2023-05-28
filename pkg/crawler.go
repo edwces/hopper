@@ -35,7 +35,7 @@ type Crawler struct {
 	Client            *http.Client
 	UserAgent         string
 
-	frontier  *MemoryFrontier
+	queue     *InMemoryURLQueue
 	storage   map[string]any
 	seenUrls  map[string]bool
 	robotsMap map[string]*robotstxt.RobotsData
@@ -71,8 +71,8 @@ func (c *Crawler) Init() error {
 		return err
 	}
 
-	c.frontier = &MemoryFrontier{Delay: c.Delay}
-	c.frontier.Init()
+	c.queue = &InMemoryURLQueue{Delay: c.Delay}
+	c.queue.Init()
 	c.storage = map[string]any{}
 	c.seenUrls = map[string]bool{}
 	c.robotsMap = map[string]*robotstxt.RobotsData{}
@@ -84,12 +84,16 @@ func (c *Crawler) Init() error {
 // Crawl returns websites data accumulated by crawling over webpages
 func (c *Crawler) Crawl(seeds ...string) map[string]any {
 	for _, seed := range seeds {
+		parsedSeed, err := url.Parse(seed)
+		if err != nil {
+			errorLogger.Panic("can't parse seed")
+		}
 		c.seenUrls[seed] = true
-		c.frontier.Push(seed)
+		c.queue.Push(parsedSeed)
 	}
 
-	for c.frontier.Len() != 0 {
-		c.Visit(c.frontier.Pop())
+	for c.queue.Len() != 0 {
+		c.Visit(c.queue.Pop())
 	}
 
 	return c.storage
@@ -122,7 +126,7 @@ func (c *Crawler) fetchRobotsTxt(uri url.URL) (*robotstxt.RobotsData, error) {
 		}
 		c.robotsMap[uri.Host] = robots
 		agentGroup := robots.FindGroup(c.UserAgent)
-		c.frontier.Update(uri.Host, agentGroup.CrawlDelay)
+		c.queue.Update(uri.Host, agentGroup.CrawlDelay)
 	}
 
 	robots := c.robotsMap[uri.Host]
@@ -186,7 +190,7 @@ func (c *Crawler) Visit(rawUrl string) error {
 			warningLogger.Printf("Infinite redirect from url: %s", uri)
 			return errors.New("infinite redirect")
 		}
-		c.frontier.Push(loc.String())
+		c.queue.Push(loc)
 		c.seenUrls[loc.String()] = true
 		return nil
 	}
@@ -216,8 +220,8 @@ func (c *Crawler) Visit(rawUrl string) error {
 	dedupedUrls := dedup(filteredUrls)
 	unseenUrls := getUnseenUrls(dedupedUrls, c.seenUrls)
 
-	for _, rawUrl := range unseenUrls {
-		c.frontier.Push(rawUrl)
+	for _, unseenUrl := range unseenUrls {
+		c.queue.Push(unseenUrl)
 		c.seenUrls[rawUrl] = true
 	}
 
@@ -225,8 +229,8 @@ func (c *Crawler) Visit(rawUrl string) error {
 }
 
 // extractUrls returns all urls extracted from given node tree
-func extractUrls(node *html.Node, uri *url.URL) []string {
-	extractedUrls := []string{}
+func extractUrls(node *html.Node, uri *url.URL) []*url.URL {
+	extractedUrls := []*url.URL{}
 	searchNode(node, func(node *html.Node) {
 		if node.Type == html.ElementNode && node.Data == "a" {
 			for _, attribute := range node.Attr {
@@ -278,17 +282,13 @@ func dedup[T comparable](slice []T) []T {
 }
 
 // filterUrls returns a urls filtered based on passed filter rules
-func filterUrls(urls, allowedDomains, disallowedDomains []string) []string {
-	filteredUrls := []string{}
+func filterUrls(urls []*url.URL, allowedDomains, disallowedDomains []string) []*url.URL {
+	filteredUrls := []*url.URL{}
 	for _, urlProccessed := range urls {
-		parsedUrl, err := url.Parse(urlProccessed)
-		if err != nil {
+		if !contains(allowedDomains, "*") && !contains(allowedDomains, urlProccessed.Host) {
 			continue
 		}
-		if !contains(allowedDomains, "*") && !contains(allowedDomains, parsedUrl.Host) {
-			continue
-		}
-		if contains(disallowedDomains, parsedUrl.Host) {
+		if contains(disallowedDomains, urlProccessed.Host) {
 			continue
 		}
 		filteredUrls = append(filteredUrls, urlProccessed)
@@ -298,10 +298,10 @@ func filterUrls(urls, allowedDomains, disallowedDomains []string) []string {
 
 // getUnseenUrls returns a set like diferrence
 // between first and second passed slices of urls.
-func getUnseenUrls(urls []string, seenUrls map[string]bool) []string {
-	unseenUrls := []string{}
+func getUnseenUrls(urls []*url.URL, seenUrls map[string]bool) []*url.URL {
+	unseenUrls := []*url.URL{}
 	for _, urlProccessed := range urls {
-		_, doesExist := seenUrls[urlProccessed]
+		_, doesExist := seenUrls[urlProccessed.String()]
 		if !doesExist {
 			unseenUrls = append(unseenUrls, urlProccessed)
 		}
@@ -310,14 +310,14 @@ func getUnseenUrls(urls []string, seenUrls map[string]bool) []string {
 }
 
 // normalizeUrl returns normalized version of the urlProccessed passed.
-func normalizeUrl(ref string, uri *url.URL) (string, error) {
+func normalizeUrl(ref string, uri *url.URL) (*url.URL, error) {
 	refUrl, err := url.Parse(ref)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	normalizedUrl := uri.ResolveReference(refUrl)
 	if normalizedUrl.Scheme != "http" && normalizedUrl.Scheme != "https" {
-		return "", errors.New("unsupported protocol")
+		return nil, errors.New("unsupported protocol")
 	}
-	return normalizedUrl.String(), nil
+	return normalizedUrl, nil
 }

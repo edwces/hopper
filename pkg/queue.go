@@ -87,7 +87,7 @@ func (pq *PQueue) Update(item *PQHeapItem, value any, priority any) {
 	pq.pqheap.Update(item, value, priority)
 }
 
-type MemoryFrontier struct {
+type InMemoryURLQueue struct {
 	Delay time.Duration
 
 	hostQueue *PQueue
@@ -95,80 +95,65 @@ type MemoryFrontier struct {
 	size      int
 }
 
-type HostQueue struct {
-	Delay   time.Duration
-	LastReq time.Time
+type URLHost struct {
+	Delay time.Duration
 
-	uriQueue *PQueue
+	queue []string
 }
 
-// Init heapifies all items in queue.
-func (mf *MemoryFrontier) Init(rawUrls ...string) {
-	if mf.Delay == 0 {
-		errorLogger.Fatal("frontier default delay has not been specified")
-	}
+// Init initializes queue with given urls.
+func (muq *InMemoryURLQueue) Init(uris ...*url.URL) {
+	muq.hostQueue = NewPQueue(func(x, y any) bool { return x.(time.Time).Before(y.(time.Time)) })
+	muq.hostMap = map[string]*PQHeapItem{}
 
-	mf.hostQueue = NewPQueue(func(x, y any) bool { return x.(time.Time).Before(y.(time.Time)) })
-	mf.hostMap = map[string]*PQHeapItem{}
-	for _, rawUrl := range rawUrls {
-		mf.Push(rawUrl)
+	for _, uri := range uris {
+		muq.Push(uri)
 	}
 }
 
-// Push safely adds item to queue.
-func (mf *MemoryFrontier) Push(rawUrl string) error {
-
-	uri, err := url.Parse(rawUrl)
-	if err != nil {
-		return err
-	}
-
-	// check if hostQueue for given url exists
-	hostItem, exists := mf.hostMap[uri.Host]
+// Push adds uri to the queue.
+func (muq *InMemoryURLQueue) Push(uri *url.URL) error {
+	// check if URLHost for given url exists
+	urlHost, exists := muq.hostMap[uri.Host]
 	if !exists {
-		uriQueue := NewPQueue(func(x, y any) bool { return x.(int) < y.(int) })
-		hostQueue := &HostQueue{uriQueue: uriQueue, LastReq: time.Now().Add(-mf.Delay), Delay: mf.Delay}
-		hostItem = &PQHeapItem{value: hostQueue, priority: time.Now()}
-		mf.hostQueue.Push(hostItem)
-		mf.hostMap[uri.Host] = hostItem
+		urlHostValue := &URLHost{queue: []string{}, Delay: muq.Delay}
+		urlHost = &PQHeapItem{value: urlHostValue, priority: time.Now()}
+		muq.hostQueue.Push(urlHost)
+		muq.hostMap[uri.Host] = urlHost
 	}
 
-	uriItem := &PQHeapItem{value: rawUrl, priority: 1}
-	hostItem.value.(*HostQueue).uriQueue.Push(uriItem)
-	mf.size++
+	urlHost.value.(*URLHost).queue = append(urlHost.value.(*URLHost).queue, uri.String())
+	muq.size++
 
 	return nil
 }
 
-// Pop returns and removes item with highest priority.
+// Pop returns and removes item which is scheduled the latest.
 // It also waits the specified delay for given url host.
-func (mf *MemoryFrontier) Pop() string {
-	hostItem := mf.hostQueue.Peek()
-	hostQueue := hostItem.value.(*HostQueue)
+func (muq *InMemoryURLQueue) Pop() string {
+	urlHost := muq.hostQueue.Peek()
+	urlHostValue := urlHost.value.(*URLHost)
 
-	time.Sleep(time.Until(hostQueue.LastReq.Add(hostQueue.Delay)))
+	time.Sleep(time.Until(urlHost.priority.(time.Time)))
+	muq.hostQueue.Update(urlHost, urlHost.value, time.Now().Add(urlHostValue.Delay))
 
-	// update time of request
-	hostQueue.LastReq = time.Now()
-	mf.hostQueue.Update(hostItem, hostItem.value, time.Now().Add(hostQueue.Delay))
+	n := len(urlHostValue.queue)
+	uri := urlHostValue.queue[n-1]
+	urlHostValue.queue = urlHostValue.queue[:n-1]
+	muq.size--
 
-	uriItem := hostQueue.uriQueue.Pop()
-	mf.size--
-
-	return uriItem.value.(string)
+	return uri
 }
 
-func (mf *MemoryFrontier) Len() int {
-	return mf.size
+// Len returns length of overall uri items in all hosts.
+func (muq *InMemoryURLQueue) Len() int {
+	return muq.size
 }
 
-func (mf *MemoryFrontier) Update(host string, delay time.Duration) {
-	hostItem, exists := mf.hostMap[host]
-	if exists {
-		if delay == 0 {
-			delay = hostItem.value.(*HostQueue).Delay
-		}
-		hostItem.value.(*HostQueue).LastReq = time.Now().Add(-delay)
-		hostItem.value.(*HostQueue).Delay = delay
+// Update changes URLHost Delay.
+func (muq *InMemoryURLQueue) Update(host string, delay time.Duration) {
+	hostItem, exists := muq.hostMap[host]
+	if exists && delay != 0 {
+		hostItem.value.(*URLHost).Delay = delay
 	}
 }
