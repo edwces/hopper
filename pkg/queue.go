@@ -6,123 +6,92 @@ import (
 	"time"
 )
 
-type Item struct {
+type PQHeapItem struct {
 	value    any
-	priority int
+	priority any
 	index    int
 }
 
-type PQueue []*Item
+type PQueueHeap struct {
+	heap        []*PQHeapItem
+	compareFunc func(x any, y any) bool
+}
 
 // Len returns size of priority queue.
-func (pq PQueue) Len() int {
-	return len(pq)
+func (pqh PQueueHeap) Len() int {
+	return len(pqh.heap)
 }
 
 // Less returns true if Item with index j has lower priority than
 // Item with index i.
-func (pq PQueue) Less(i, j int) bool {
-	return pq[i].priority > pq[j].priority
+func (pqh PQueueHeap) Less(i, j int) bool {
+	return pqh.compareFunc(pqh.heap[i].priority, pqh.heap[j].priority)
 }
 
 // Swap swaps heap items with indexes i, j.
-func (pq PQueue) Swap(i, j int) {
-	pq[i], pq[j] = pq[j], pq[i]
-	pq[i].index = i
-	pq[j].index = j
+func (pqh PQueueHeap) Swap(i, j int) {
+	pqh.heap[i], pqh.heap[j] = pqh.heap[j], pqh.heap[i]
+	pqh.heap[i].index = i
+	pqh.heap[j].index = j
 }
 
 // Push appends an Item to the heap.
-func (pq *PQueue) Push(x any) {
-	n := len(*pq)
-	item := x.(*Item)
+func (pqh *PQueueHeap) Push(x any) {
+	n := len(pqh.heap)
+	item := x.(*PQHeapItem)
 	item.index = n
-	*pq = append(*pq, item)
+	pqh.heap = append(pqh.heap, item)
 }
 
 // Update changes item priority and value.
-func (pq *PQueue) Update(item *Item, value any, priority int) {
+func (pqh *PQueueHeap) Update(item *PQHeapItem, value any, priority any) {
 	item.value = value
 	item.priority = priority
-	heap.Fix(pq, item.index)
+	heap.Fix(pqh, item.index)
 }
 
 // Pop removes and returns item with a highest priority.
-func (pq *PQueue) Pop() any {
-	n := len(*pq)
-	full := *pq
+func (pqh *PQueueHeap) Pop() any {
+	n := len(pqh.heap)
+	full := pqh.heap
 	popped := full[n-1]
 	full[n-1] = nil
-	*pq = full[:n-1]
+	pqh.heap = full[:n-1]
 	return popped
 }
 
-func (pq *PQueue) Peek() any {
-	full := *pq
-	return full[0]
+type PQueue struct {
+	pqheap *PQueueHeap
 }
 
-type TimeItem struct {
-	value    any
-	priority time.Time
-	index    int
+func NewPQueue(compareFunc func(x any, y any) bool) *PQueue {
+	pq := PQueue{}
+	pq.pqheap = &PQueueHeap{compareFunc: compareFunc}
+	heap.Init(pq.pqheap)
+	return &pq
 }
 
-type TimeQueue []*TimeItem
-
-// Len returns size of priority queue.
-func (tq TimeQueue) Len() int {
-	return len(tq)
+func (pq *PQueue) Push(item *PQHeapItem) {
+	heap.Push(pq.pqheap, item)
 }
 
-// Less returns true if Item with index j has lower priority than
-// Item with index i.
-func (tq TimeQueue) Less(i, j int) bool {
-	return tq[i].priority.Before(tq[j].priority)
+func (pq *PQueue) Pop() *PQHeapItem {
+	return heap.Pop(pq.pqheap).(*PQHeapItem)
 }
 
-// Swap swaps heap items with indexes i, j.
-func (tq TimeQueue) Swap(i, j int) {
-	tq[i], tq[j] = tq[j], tq[i]
-	tq[i].index = i
-	tq[j].index = j
+func (pq *PQueue) Peek() *PQHeapItem {
+	return pq.pqheap.heap[0]
 }
 
-// Push appends an Item to the heap.
-func (tq *TimeQueue) Push(x any) {
-	n := len(*tq)
-	item := x.(*TimeItem)
-	item.index = n
-	*tq = append(*tq, item)
-}
-
-// Update changes item priority and value.
-func (tq *TimeQueue) Update(item *TimeItem, value any, priority time.Time) {
-	item.value = value
-	item.priority = priority
-	heap.Fix(tq, item.index)
-}
-
-// Pop removes and returns item with a highest priority.
-func (tq *TimeQueue) Pop() any {
-	n := len(*tq)
-	full := *tq
-	popped := full[n-1]
-	full[n-1] = nil
-	*tq = full[:n-1]
-	return popped
-}
-
-func (tq *TimeQueue) Peek() any {
-	full := *tq
-	return full[0]
+func (pq *PQueue) Update(item *PQHeapItem, value any, priority any) {
+	pq.pqheap.Update(item, value, priority)
 }
 
 type MemoryFrontier struct {
 	Delay time.Duration
 
-	hostQueue *TimeQueue
-	hostMap   map[string]*TimeItem
+	hostQueue *PQueue
+	hostMap   map[string]*PQHeapItem
 	size      int
 }
 
@@ -139,9 +108,8 @@ func (mf *MemoryFrontier) Init(rawUrls ...string) {
 		errorLogger.Fatal("frontier default delay has not been specified")
 	}
 
-	mf.hostQueue = &TimeQueue{}
-	mf.hostMap = map[string]*TimeItem{}
-	heap.Init(mf.hostQueue)
+	mf.hostQueue = NewPQueue(func(x, y any) bool { return x.(time.Time).Before(y.(time.Time)) })
+	mf.hostMap = map[string]*PQHeapItem{}
 	for _, rawUrl := range rawUrls {
 		mf.Push(rawUrl)
 	}
@@ -158,16 +126,15 @@ func (mf *MemoryFrontier) Push(rawUrl string) error {
 	// check if hostQueue for given url exists
 	hostItem, exists := mf.hostMap[uri.Host]
 	if !exists {
-		uriQueue := &PQueue{}
-		heap.Init(uriQueue)
+		uriQueue := NewPQueue(func(x, y any) bool { return x.(int) < y.(int) })
 		hostQueue := &HostQueue{uriQueue: uriQueue, LastReq: time.Now().Add(-mf.Delay), Delay: mf.Delay}
-		hostItem = &TimeItem{value: hostQueue, priority: time.Now()}
-		heap.Push(mf.hostQueue, hostItem)
+		hostItem = &PQHeapItem{value: hostQueue, priority: time.Now()}
+		mf.hostQueue.Push(hostItem)
 		mf.hostMap[uri.Host] = hostItem
 	}
 
-	uriItem := &Item{value: rawUrl, priority: 1}
-	heap.Push(hostItem.value.(*HostQueue).uriQueue, uriItem)
+	uriItem := &PQHeapItem{value: rawUrl, priority: 1}
+	hostItem.value.(*HostQueue).uriQueue.Push(uriItem)
 	mf.size++
 
 	return nil
@@ -176,7 +143,7 @@ func (mf *MemoryFrontier) Push(rawUrl string) error {
 // Pop returns and removes item with highest priority.
 // It also waits the specified delay for given url host.
 func (mf *MemoryFrontier) Pop() string {
-	hostItem := mf.hostQueue.Peek().(*TimeItem)
+	hostItem := mf.hostQueue.Peek()
 	hostQueue := hostItem.value.(*HostQueue)
 
 	time.Sleep(time.Until(hostQueue.LastReq.Add(hostQueue.Delay)))
@@ -185,10 +152,10 @@ func (mf *MemoryFrontier) Pop() string {
 	hostQueue.LastReq = time.Now()
 	mf.hostQueue.Update(hostItem, hostItem.value, time.Now().Add(hostQueue.Delay))
 
-	uriItem := heap.Pop(hostQueue.uriQueue)
+	uriItem := hostQueue.uriQueue.Pop()
 	mf.size--
 
-	return uriItem.(*Item).value.(string)
+	return uriItem.value.(string)
 }
 
 func (mf *MemoryFrontier) Len() int {
