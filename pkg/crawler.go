@@ -84,12 +84,13 @@ func (c *Crawler) Init() error {
 // Crawl returns websites data accumulated by crawling over webpages
 func (c *Crawler) Crawl(seeds ...string) map[string]any {
 	for _, seed := range seeds {
-		parsedSeed, err := url.Parse(seed)
+		uri, err := url.Parse(seed)
 		if err != nil {
-			errorLogger.Panic("can't parse seed")
+			warningLogger.Printf("can't parse seed: %s", seed)
+			continue
 		}
-		c.seenUrls[seed] = true
-		c.queue.Push(parsedSeed)
+		c.seenUrls[uri.String()] = true
+		c.queue.Push(uri)
 	}
 
 	for c.queue.Len() != 0 {
@@ -108,8 +109,25 @@ func (c *Crawler) newRequest(method, rawUrl string) *http.Request {
 	return req
 }
 
+func (c *Crawler) handleRedirect(resp *http.Response, uri *url.URL) error {
+	infoLogger.Printf("Redirecting from url: %s", uri.String())
+	loc, err := resp.Location()
+	if err != nil {
+		return err
+	}
+	// handle infinite redirect
+	if loc.String() == uri.String() {
+		warningLogger.Printf("Infinite redirect from url: %s", uri.String())
+		return errors.New("infinite redirect")
+	}
+	c.queue.Push(loc)
+	c.seenUrls[loc.String()] = true
+	return nil
+}
+
 func (c *Crawler) fetchRobotsTxt(uri url.URL) (*robotstxt.RobotsData, error) {
-	if c.robotsMap[uri.Host] == nil {
+	robots, exists := c.robotsMap[uri.Host]
+	if !exists {
 		infoLogger.Printf("Fetching robots.txt for host: %s", uri.Host)
 		uri.Path = "/robots.txt"
 		req := c.newRequest("GET", uri.String())
@@ -120,7 +138,7 @@ func (c *Crawler) fetchRobotsTxt(uri url.URL) (*robotstxt.RobotsData, error) {
 		if err != nil {
 			return nil, err
 		}
-		robots, err := robotstxt.FromResponse(resp)
+		robots, err = robotstxt.FromResponse(resp)
 		if err != nil {
 			return nil, err
 		}
@@ -128,8 +146,6 @@ func (c *Crawler) fetchRobotsTxt(uri url.URL) (*robotstxt.RobotsData, error) {
 		agentGroup := robots.FindGroup(c.UserAgent)
 		c.queue.Update(uri.Host, agentGroup.CrawlDelay)
 	}
-
-	robots := c.robotsMap[uri.Host]
 	return robots, nil
 }
 
@@ -143,11 +159,12 @@ func (c *Crawler) Visit(rawUrl string) error {
 	robots, err := c.fetchRobotsTxt(*uri)
 	if err != nil {
 		warningLogger.Printf("Could not fetch robots.txt for url: %s", uri.String())
-	}
-	agentGroup := robots.FindGroup(c.UserAgent)
-	if !agentGroup.Test(uri.EscapedPath()) {
-		warningLogger.Printf("Robots.txt exclusion for url: %s", uri.String())
-		return errors.New("robots.txt exclusion")
+	} else {
+		agentGroup := robots.FindGroup(c.UserAgent)
+		if !agentGroup.Test(uri.EscapedPath()) {
+			warningLogger.Printf("Robots.txt exclusion for url: %s", uri.String())
+			return errors.New("robots.txt exclusion")
+		}
 	}
 
 	// check mimetype before so we don't need to download full body
@@ -162,8 +179,8 @@ func (c *Crawler) Visit(rawUrl string) error {
 		return err
 	}
 
-	mediatype, _, _ := mime.ParseMediaType(headResp.Header.Get("Content-Type"))
-	if mediatype != c.Mediatype && mediatype != "text/html" {
+	mediatype, _, err := mime.ParseMediaType(headResp.Header.Get("Content-Type"))
+	if mediatype != c.Mediatype && mediatype != "text/html" || err != nil {
 		return nil
 	}
 
@@ -180,19 +197,7 @@ func (c *Crawler) Visit(rawUrl string) error {
 
 	// handle redirects
 	if resp.StatusCode > 300 && resp.StatusCode < 400 {
-		infoLogger.Printf("Redirecting from url: %s", uri)
-		loc, err := resp.Location()
-		if err != nil {
-			return err
-		}
-		// handle infinite redirect
-		if loc.String() == uri.String() {
-			warningLogger.Printf("Infinite redirect from url: %s", uri)
-			return errors.New("infinite redirect")
-		}
-		c.queue.Push(loc)
-		c.seenUrls[loc.String()] = true
-		return nil
+		return c.handleRedirect(resp, uri)
 	}
 
 	bytes, err := io.ReadAll(resp.Body)
@@ -214,7 +219,6 @@ func (c *Crawler) Visit(rawUrl string) error {
 		return err
 	}
 
-	// TODO: Maybe filter via robots.txt here ?
 	extractedUrls := extractUrls(doc, uri)
 	filteredUrls := filterUrls(extractedUrls, c.AllowedDomains, c.DisallowedDomains)
 	dedupedUrls := dedup(filteredUrls)
