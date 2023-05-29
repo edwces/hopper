@@ -60,9 +60,7 @@ func (c *Crawler) Init() error {
 	}
 	if c.Client == nil {
 		c.Client = http.DefaultClient
-		c.Client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		}
+		c.Client.CheckRedirect = c.checkRedirect
 	}
 
 	_, _, err := mime.ParseMediaType(c.Mediatype)
@@ -100,53 +98,54 @@ func (c *Crawler) Crawl(seeds ...string) map[string]any {
 	return c.storage
 }
 
-func (c *Crawler) newRequest(method, rawUrl string) *http.Request {
+func (c *Crawler) Request(method, rawUrl string) (*http.Response, error) {
 	req, err := http.NewRequest(method, rawUrl, nil)
 	if err != nil {
-		errorLogger.Fatalf("Invalid request: %s %s", method, rawUrl)
+		return nil, err
 	}
 	req.Header.Set("User-Agent", c.UserAgent)
-	return req
+	res, err := c.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 
-func (c *Crawler) handleRedirect(resp *http.Response, uri *url.URL) error {
-	infoLogger.Printf("Redirecting from url: %s", uri.String())
-	loc, err := resp.Location()
-	if err != nil {
-		return err
-	}
-	// handle infinite redirect
-	if loc.String() == uri.String() {
-		warningLogger.Printf("Infinite redirect from url: %s", uri.String())
+func (c *Crawler) checkRedirect(req *http.Request, via []*http.Request) error {
+	n := len(via)
+	last := via[n-1]
+
+	if req.URL.String() == last.URL.String() {
 		return errors.New("infinite redirect")
 	}
-	c.queue.Push(loc)
-	c.seenUrls[loc.String()] = true
+	if n >= 10 {
+		return errors.New("more than 10 redirects")
+	}
+
+	c.seenUrls[req.URL.String()] = true
 	return nil
 }
 
-func (c *Crawler) fetchRobotsTxt(uri url.URL) (*robotstxt.RobotsData, error) {
+func (c *Crawler) checkRobotsTxt(uri url.URL) (bool, error) {
 	robots, exists := c.robotsMap[uri.Host]
 	if !exists {
-		infoLogger.Printf("Fetching robots.txt for host: %s", uri.Host)
 		uri.Path = "/robots.txt"
-		req := c.newRequest("GET", uri.String())
-		resp, err := c.Client.Do(req)
+		resp, err := c.Request("GET", uri.String())
 		if resp != nil {
 			defer resp.Body.Close()
 		}
 		if err != nil {
-			return nil, err
+			return true, err
 		}
 		robots, err = robotstxt.FromResponse(resp)
 		if err != nil {
-			return nil, err
+			return true, err
 		}
 		c.robotsMap[uri.Host] = robots
 		agentGroup := robots.FindGroup(c.UserAgent)
 		c.queue.Update(uri.Host, agentGroup.CrawlDelay)
 	}
-	return robots, nil
+	return robots.FindGroup(c.UserAgent).Test(uri.EscapedPath()), nil
 }
 
 func (c *Crawler) Visit(rawUrl string) error {
@@ -156,53 +155,40 @@ func (c *Crawler) Visit(rawUrl string) error {
 	}
 
 	// check robots.txt exclusion
-	robots, err := c.fetchRobotsTxt(*uri)
-	if err != nil {
-		warningLogger.Printf("Could not fetch robots.txt for url: %s", uri.String())
-	} else {
-		agentGroup := robots.FindGroup(c.UserAgent)
-		if !agentGroup.Test(uri.EscapedPath()) {
-			warningLogger.Printf("Robots.txt exclusion for url: %s", uri.String())
-			return errors.New("robots.txt exclusion")
-		}
+	included, _ := c.checkRobotsTxt(*uri)
+	if !included {
+		warningLogger.Printf("Robots.txt exclusion for url: %s", uri.String())
+		return errors.New("robots.txt exclusion")
 	}
 
 	// check mimetype before so we don't need to download full body
-	infoLogger.Printf("Requesting headers for url: %s", uri.String())
-	req := c.newRequest("HEAD", uri.String())
-	headResp, err := c.Client.Do(req)
-	if headResp != nil {
-		defer headResp.Body.Close()
+	resp, err := c.Request("HEAD", uri.String())
+	if resp != nil {
+		defer resp.Body.Close()
 	}
 	if err != nil {
 		warningLogger.Printf("Could not return response for url: %s", uri.String())
 		return err
 	}
 
-	mediatype, _, err := mime.ParseMediaType(headResp.Header.Get("Content-Type"))
+	mediatype, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if mediatype != c.Mediatype && mediatype != "text/html" || err != nil {
 		return nil
 	}
 
 	infoLogger.Printf("Fetching url: %s", uri.String())
-	req = c.newRequest("GET", uri.String())
-	resp, err := c.Client.Do(req)
+	resp, err = c.Request("GET", uri.String())
 	if resp != nil {
 		defer resp.Body.Close()
 	}
 	if err != nil {
-		warningLogger.Printf("Could not return response for url: %s", uri)
+		warningLogger.Printf("Could not return response for url: %s", uri.String())
 		return err
-	}
-
-	// handle redirects
-	if resp.StatusCode > 300 && resp.StatusCode < 400 {
-		return c.handleRedirect(resp, uri)
 	}
 
 	bytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		warningLogger.Printf("Could not read body for url: %s", uri)
+		warningLogger.Printf("Could not read body for url: %s", uri.String())
 		return err
 	}
 
@@ -215,7 +201,7 @@ func (c *Crawler) Visit(rawUrl string) error {
 
 	doc, err := html.Parse(strings.NewReader(string(bytes)))
 	if err != nil {
-		warningLogger.Printf("Could not parse body for url: %s", uri)
+		warningLogger.Printf("Could not parse body for url: %s", uri.String())
 		return err
 	}
 
@@ -241,7 +227,6 @@ func extractUrls(node *html.Node, uri *url.URL) []*url.URL {
 				if attribute.Key == "href" {
 					normalizedUrl, err := normalizeUrl(attribute.Val, uri)
 					if err != nil {
-						warningLogger.Printf("Could not normalize url: %s", err)
 						break
 					}
 					extractedUrls = append(extractedUrls, normalizedUrl)
