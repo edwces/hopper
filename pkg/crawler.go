@@ -13,7 +13,7 @@ type Crawler struct {
 	OnParse func(*http.Response, *html.Node)
 
 	queue []*url.URL
-	seen  map[*url.URL]bool
+	seen  map[string]bool
 }
 
 // Init initializes default values for crawler.
@@ -23,14 +23,14 @@ func (c *Crawler) Init() {
     }
 
 	c.queue = []*url.URL{}
-	c.seen = map[*url.URL]bool{}
+	c.seen = map[string]bool{}
 }
 
 // Traverse uses depth-first search for link traversal.
 func (c *Crawler) Traverse(seeds ...string) {
 	for _, seed := range seeds {
 		if uri, err := url.Parse(seed); err == nil {
-			c.seen[uri] = true
+			c.seen[uri.String()] = true
 			c.queue = append(c.queue, uri)
 		}
 	}
@@ -73,10 +73,10 @@ func (c *Crawler) Visit(uri *url.URL) {
 						continue
 					}
 					resolved := uri.ResolveReference(discovery)
-					if c.seen[resolved] || !validURI(resolved) {
+					if c.seen[resolved.String()] || !validURI(resolved) {
 						continue
 					}
-					c.seen[resolved] = true
+					c.seen[resolved.String()] = true
 					c.queue = append(c.queue, resolved)
 				}
 			}
