@@ -17,5 +17,5 @@ func main() {
     }
 
 	crawler.Init()
-	crawler.Traverse("https://www.geeksforgeeks.org/zero-value-in-golang/")
+	crawler.Traverse("https://crawler-test.com/redirects/redirect_1")
 }
