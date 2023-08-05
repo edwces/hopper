@@ -9,7 +9,10 @@ import (
 	"golang.org/x/net/html"
 )
 
+const DefaultUserAgent = "hopper/0.1"
+
 type Crawler struct {
+    UserAgent string
 	OnParse func(*http.Response, *html.Node)
 
 	queue *URLQueue 
@@ -17,6 +20,10 @@ type Crawler struct {
 
 // Init initializes default values for crawler.
 func (c *Crawler) Init() {
+    if c.UserAgent == "" {
+        c.UserAgent = DefaultUserAgent
+    }
+
     if c.OnParse == nil {
         c.OnParse = func(r *http.Response, n *html.Node) {}
     }
@@ -38,15 +45,15 @@ func (c *Crawler) Traverse(seeds ...string) {
 }
 
 func (c *Crawler) Visit(uri *url.URL) {
-	resp, err := http.Get(uri.String())
-	if resp != nil {
-		defer resp.Body.Close()
+	res, err := c.Request(uri.String())
+	if res != nil {
+		defer res.Body.Close()
 	}
 	if err != nil {
 		return
 	}
 
-	bytes, err := io.ReadAll(resp.Body)
+	bytes, err := io.ReadAll(res.Body)
 	if err != nil {
 		return
 	}
@@ -55,7 +62,7 @@ func (c *Crawler) Visit(uri *url.URL) {
 		return
 	}
 
-	c.OnParse(resp, doc)
+	c.OnParse(res, doc)
 
 	// Extract uri's from document.
 	var f func(*html.Node)
@@ -80,6 +87,20 @@ func (c *Crawler) Visit(uri *url.URL) {
 		}
 	}
 	f(doc)
+}
+
+// Send a http GET Request with defined headings and return response. 
+func (c *Crawler) Request(uri string) (*http.Response, error) {
+    req, err := http.NewRequest("GET", uri, nil)
+    if err != nil {
+        return nil, err
+    }
+    req.Header.Set("User-Agent", c.UserAgent)
+    res, err := http.DefaultClient.Do(req)
+    if err != nil {
+        return res, err
+    }
+    return res, nil
 }
 
 func validURI(uri *url.URL) bool {
