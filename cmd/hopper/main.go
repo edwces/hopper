@@ -13,9 +13,9 @@ func main() {
 	crawler := hopper.Crawler{}
 
     crawler.OnParse = func(res *http.Response, n *html.Node) {
-        fmt.Println(res.Request.URL.String())
+        fmt.Println(res.Request.URL.String()) 
     }
 
 	crawler.Init()
-	crawler.Traverse("https://crawler-test.com/redirects/redirect_1")
+	crawler.Run("https://crawler-test.com/redirects/redirect_1")
 }
