@@ -1,54 +1,12 @@
 package hopper
 
 import (
-	"container/heap"
 	"math"
 	"net/url"
 	"sync"
 )
 
 type URLQueue struct {
-type PQueueItem struct {
-	value    any
-	priority int
-	index    int
-}
-
-type PQueue []*PQueueItem
-
-func (pq PQueue) Len() int { return len(pq) }
-
-func (pq PQueue) Less(i, j int) bool {
-	return pq[i].priority > pq[j].priority
-}
-
-func (pq PQueue) Swap(i, j int) {
-	pq[i], pq[j] = pq[j], pq[i]
-	pq[i].index = i
-	pq[j].index = j
-}
-
-func (pq *PQueue) Push(x any) {
-	n := len(*pq)
-	item := x.(*PQueueItem)
-	item.index = n
-	*pq = append(*pq, item)
-}
-
-func (pq *PQueue) Pop() any {
-	old := *pq
-	n := len(old)
-	item := old[n-1]
-	*pq = old[:n-1]
-	return item
-}
-
-func (pq *PQueue) Update(item *PQueueItem, value any, priority int) {
-	item.value = value
-	item.priority = priority
-	heap.Fix(pq, item.index)
-}
-
 	sync.Mutex
 
 	Free chan int
