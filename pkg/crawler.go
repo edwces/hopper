@@ -6,22 +6,34 @@ import (
 	"net/url"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/net/html"
 )
 
-const DefaultUserAgent = "hopper/0.1"
+const (
+    DefaultUserAgent = "hopper/0.1"
+    DefaultDelay = time.Second * 15 
+)
+
+type Host struct {
+    sync.Mutex
+
+    LastVisit time.Time
+}
 
 // NOTE: might be better to refactor Worker proccess into it's own class
 // but this way we would also need some easy way to copy config
 
 type Crawler struct {
+    sync.Mutex
 	UserAgent string
 	OnParse   func(*http.Response, *html.Node)
 	Threads   int
 
 	queue *URLQueue
+    hostmap map[string]*Host
 }
 
 // Init initializes default values for crawler.
@@ -38,6 +50,7 @@ func (c *Crawler) Init() {
 	}
 
 	c.queue = NewURLQueue(c.Threads)
+    c.hostmap = map[string]*Host{}
 }
 
 // Traverse uses depth-first search for link traversal.
@@ -69,9 +82,7 @@ func (c *Crawler) Traverse() {
 }
 
 func (c *Crawler) Visit(uri *url.URL) {
-	res, err := c.Request(uri.String())
-	// temporarily FOR safety
-	time.Sleep(time.Second * 5)
+	res, err := c.Request(uri)
 
 	if res != nil {
 		defer res.Body.Close()
@@ -118,8 +129,22 @@ func (c *Crawler) Visit(uri *url.URL) {
 	f(doc)
 }
 
-func (c *Crawler) Request(uri string) (*http.Response, error) {
-	req, err := http.NewRequest("GET", uri, nil)
+func (c *Crawler) Request(uri *url.URL) (*http.Response, error) { 
+    // Lock so creation of host and retrevial is safe
+    c.Lock() 
+    if c.hostmap[uri.Hostname()] == nil {
+        host := &Host{LastVisit: time.Now().Add(-DefaultDelay)}
+        c.hostmap[uri.Hostname()] = host
+    }
+    host := c.hostmap[uri.Hostname()]
+    c.Unlock()
+
+
+    // Lock so only one thread can access one host at a time
+    host.Lock()
+    time.Sleep(time.Until(host.LastVisit.Add(DefaultDelay)))
+
+	req, err := http.NewRequest("GET", uri.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -128,6 +153,10 @@ func (c *Crawler) Request(uri string) (*http.Response, error) {
 	if err != nil {
 		return res, err
 	}
+    
+    host.LastVisit = time.Now()
+    host.Unlock()
+
 	return res, nil
 }
 
