@@ -13,15 +13,15 @@ import (
 )
 
 const (
-    DefaultUserAgent = "hopper/0.1"
-    DefaultDelay = time.Second * 15 
+	DefaultUserAgent = "hopper/0.1"
+	DefaultDelay     = time.Second * 15
 )
 
 // NOTE: might be better to refactor Worker proccess into it's own class
 // but this way we would also need some easy way to copy config
 
 type Crawler struct {
-    sync.Mutex
+	sync.Mutex
 	UserAgent string
 	OnParse   func(*http.Response, *html.Node)
 	Threads   int
@@ -121,7 +121,7 @@ func (c *Crawler) Visit(uri *url.URL) {
 	f(doc)
 }
 
-func (c *Crawler) Request(uri *url.URL) (*http.Response, error) { 
+func (c *Crawler) Request(uri *url.URL) (*http.Response, error) {
 	req, err := http.NewRequest("GET", uri.String(), nil)
 	if err != nil {
 		return nil, err
