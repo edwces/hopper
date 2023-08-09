@@ -17,12 +17,6 @@ const (
     DefaultDelay = time.Second * 15 
 )
 
-type Host struct {
-    sync.Mutex
-
-    LastVisit time.Time
-}
-
 // NOTE: might be better to refactor Worker proccess into it's own class
 // but this way we would also need some easy way to copy config
 
@@ -33,7 +27,6 @@ type Crawler struct {
 	Threads   int
 
 	queue *URLQueue
-    hostmap map[string]*Host
 }
 
 // Init initializes default values for crawler.
@@ -50,7 +43,6 @@ func (c *Crawler) Init() {
 	}
 
 	c.queue = NewURLQueue(c.Threads)
-    c.hostmap = map[string]*Host{}
 }
 
 // Traverse uses depth-first search for link traversal.
@@ -76,7 +68,7 @@ func (c *Crawler) StartNewWorker() {
 }
 
 func (c *Crawler) Traverse() {
-	for c.queue.Length() != 0 {
+	for c.queue.Len() != 0 {
 		c.Visit(c.queue.Pop())
 	}
 }
@@ -130,20 +122,6 @@ func (c *Crawler) Visit(uri *url.URL) {
 }
 
 func (c *Crawler) Request(uri *url.URL) (*http.Response, error) { 
-    // Lock so creation of host and retrevial is safe
-    c.Lock() 
-    if c.hostmap[uri.Hostname()] == nil {
-        host := &Host{LastVisit: time.Now().Add(-DefaultDelay)}
-        c.hostmap[uri.Hostname()] = host
-    }
-    host := c.hostmap[uri.Hostname()]
-    c.Unlock()
-
-
-    // Lock so only one thread can access one host at a time
-    host.Lock()
-    time.Sleep(time.Until(host.LastVisit.Add(DefaultDelay)))
-
 	req, err := http.NewRequest("GET", uri.String(), nil)
 	if err != nil {
 		return nil, err
@@ -153,9 +131,6 @@ func (c *Crawler) Request(uri *url.URL) (*http.Response, error) {
 	if err != nil {
 		return res, err
 	}
-    
-    host.LastVisit = time.Now()
-    host.Unlock()
 
 	return res, nil
 }

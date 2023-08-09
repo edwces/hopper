@@ -1,6 +1,7 @@
 package hopper
 
 import (
+	"container/heap"
 	"math"
 	"net/url"
 	"sync"
@@ -13,31 +14,45 @@ type URLQueue struct {
 
 	threads int
 	max     int
-	queue   []*url.URL
+	queue   *PQueue
+    hostmap map[string]*PQueueItem
 	seen    map[string]bool
 }
 
 func NewURLQueue(max int) *URLQueue {
-	return &URLQueue{
-		queue: []*url.URL{},
+    q := &URLQueue{
+		queue: &PQueue{},
+        hostmap: map[string]*PQueueItem{},
 		seen:  map[string]bool{},
 		Free:  make(chan int),
 		max:   max,
 	}
+    heap.Init(q.queue)
+    return q
 }
 
 func (u *URLQueue) Push(uri *url.URL) {
 	u.Lock()
 	defer u.Unlock()
 
+    
 	if !u.seen[uri.String()] {
+        item, exists := u.hostmap[uri.Hostname()]
+        if !exists {
+            // NOTE HOST items needs to exist all the time
+            host := NewHost(DefaultDelay)
+            item = &PQueueItem{value: host, priority: int(host.LastVisit.Unix())}
+            u.hostmap[uri.Hostname()] = item 
+            heap.Push(u.queue, item)
+        }
+ 
 		u.seen[uri.String()] = true
-		u.queue = append(u.queue, uri)
+        item.value.(*Host).Push(uri)
 	}
 	// Send signal to create x new Threads
 	// if there's extra items not being proccessed
 	// concurrently and if we have free Threads
-	balance := len(u.queue) - u.threads
+	balance := u.queue.Len() - u.threads
 	if balance > 0 && u.threads < u.max {
 		u.Free <- int(math.Min(float64(balance), float64(u.max-u.threads)))
 		// NOTE: Maybe wait here for all threads to spawn
@@ -47,17 +62,27 @@ func (u *URLQueue) Push(uri *url.URL) {
 func (u *URLQueue) Pop() *url.URL {
 	u.Lock()
 	defer u.Unlock()
+    
+    // Get most prioritozed host
+    item := u.queue.Peek().(*PQueueItem)
+    // Get it's uri
+    uri := item.value.(*Host).Pop()
+    // if host queue is empty delete it from heap else update heap
+    if item.value.(*Host).Len() == 0 {
+        // Needs to be heap.Remove for some reason ?
+        heap.Remove(u.queue, item.index)
+    } else {
+        u.queue.Update(item, item.value, int(item.value.(*Host).LastVisit.Unix()))
+    }
 
-	uri := u.queue[len(u.queue)-1]
-	u.queue = u.queue[:len(u.queue)-1]
-	return uri
+    return uri
 }
 
-func (u *URLQueue) Length() int {
-	u.Lock()
-	defer u.Unlock()
+func (u *URLQueue) Len() int {
+    u.Lock()
+    defer u.Unlock()
 
-	return len(u.queue)
+	return u.queue.Len()
 }
 
 func (u *URLQueue) AddThread() {
@@ -76,8 +101,4 @@ func (u *URLQueue) RemoveThread() {
 	if u.threads == 0 {
 		close(u.Free)
 	}
-}
-
-func (u *URLQueue) getFreeThreads() int {
-	return u.max - u.threads
 }
