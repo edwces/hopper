@@ -25,8 +25,9 @@ type Crawler struct {
 	UserAgent string
 	OnParse   func(*http.Response, *html.Node)
 	Threads   int
+	Delay     time.Duration
 
-	queue *URLQueue
+	queue *RequestQueue
 }
 
 // Init initializes default values for crawler.
@@ -37,19 +38,22 @@ func (c *Crawler) Init() {
 	if c.Threads == 0 {
 		c.Threads = runtime.GOMAXPROCS(0)
 	}
+	if c.Delay == 0 {
+		c.Delay = DefaultDelay
+	}
 
 	if c.OnParse == nil {
 		c.OnParse = func(r *http.Response, n *html.Node) {}
 	}
 
-	c.queue = NewURLQueue(c.Threads)
+	c.queue = NewRequestQueue(c.Threads)
 }
 
 // Traverse uses depth-first search for link traversal.
 func (c *Crawler) Run(seeds ...string) {
 	for _, seed := range seeds {
 		if uri, err := url.Parse(seed); err == nil {
-			go c.queue.Push(uri)
+			go c.queue.Push(c.NewRequest(uri))
 		}
 	}
 
@@ -74,7 +78,7 @@ func (c *Crawler) Traverse() {
 }
 
 func (c *Crawler) Visit(uri *url.URL) {
-	res, err := c.Request(uri)
+	res, err := c.Fetch(uri)
 
 	if res != nil {
 		defer res.Body.Close()
@@ -109,7 +113,7 @@ func (c *Crawler) Visit(uri *url.URL) {
 						continue
 					}
 
-					c.queue.Push(resolved)
+					c.queue.Push(c.NewRequest(resolved))
 
 				}
 			}
@@ -121,7 +125,7 @@ func (c *Crawler) Visit(uri *url.URL) {
 	f(doc)
 }
 
-func (c *Crawler) Request(uri *url.URL) (*http.Response, error) {
+func (c *Crawler) Fetch(uri *url.URL) (*http.Response, error) {
 	req, err := http.NewRequest("GET", uri.String(), nil)
 	if err != nil {
 		return nil, err
@@ -133,6 +137,10 @@ func (c *Crawler) Request(uri *url.URL) (*http.Response, error) {
 	}
 
 	return res, nil
+}
+
+func (c *Crawler) NewRequest(uri *url.URL) *Request {
+	return &Request{URI: uri, Delay: c.Delay}
 }
 
 func validURI(uri *url.URL) bool {

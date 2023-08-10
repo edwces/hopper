@@ -8,6 +8,12 @@ import (
 	"time"
 )
 
+type Request struct {
+	URI *url.URL
+
+	Delay time.Duration
+}
+
 type PQueueItem struct {
 	value    any
 	priority int
@@ -55,7 +61,7 @@ func (pq *PQueue) Peek() any {
 	return q[n-1]
 }
 
-type Host struct {
+type HostQueue struct {
 	mu sync.Mutex
 
 	LastVisit time.Time
@@ -63,8 +69,8 @@ type Host struct {
 	queue     []*url.URL
 }
 
-func NewHost(delay time.Duration) *Host {
-	return &Host{
+func NewHostQueue(delay time.Duration) *HostQueue {
+	return &HostQueue{
 		LastVisit: time.Now().Add(-delay),
 		Delay:     delay,
 		queue:     []*url.URL{},
@@ -72,7 +78,7 @@ func NewHost(delay time.Duration) *Host {
 	}
 }
 
-func (h *Host) Pop() *url.URL {
+func (h *HostQueue) Pop() *url.URL {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -85,21 +91,21 @@ func (h *Host) Pop() *url.URL {
 	return uri
 }
 
-func (h *Host) Push(uri *url.URL) {
+func (h *HostQueue) Push(uri *url.URL) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	h.queue = append(h.queue, uri)
 }
 
-func (h *Host) Len() int {
+func (h *HostQueue) Len() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	return len(h.queue)
 }
 
-type URLQueue struct {
+type RequestQueue struct {
 	sync.Mutex
 
 	Free chan int
@@ -111,8 +117,8 @@ type URLQueue struct {
 	seen    map[string]bool
 }
 
-func NewURLQueue(max int) *URLQueue {
-	q := &URLQueue{
+func NewRequestQueue(max int) *RequestQueue {
+	q := &RequestQueue{
 		queue:   &PQueue{},
 		hostmap: map[string]*PQueueItem{},
 		seen:    map[string]bool{},
@@ -123,22 +129,25 @@ func NewURLQueue(max int) *URLQueue {
 	return q
 }
 
-func (u *URLQueue) Push(uri *url.URL) {
+func (u *RequestQueue) Push(req *Request) {
 	u.Lock()
 	defer u.Unlock()
 
-	if !u.seen[uri.String()] {
-		item, exists := u.hostmap[uri.Hostname()]
+	if !u.seen[req.URI.String()] {
+		item, exists := u.hostmap[req.URI.Hostname()]
 		if !exists {
 			// NOTE HOST items needs to exist all the time
-			host := NewHost(DefaultDelay)
+			host := NewHostQueue(req.Delay)
 			item = &PQueueItem{value: host, priority: int(host.LastVisit.Unix())}
-			u.hostmap[uri.Hostname()] = item
+			u.hostmap[req.URI.Hostname()] = item
+			heap.Push(u.queue, item)
+			// When we remove heap item we still store it in map for later use
+		} else if item.value.(*HostQueue).Len() == 0 {
 			heap.Push(u.queue, item)
 		}
 
-		u.seen[uri.String()] = true
-		item.value.(*Host).Push(uri)
+		u.seen[req.URI.String()] = true
+		item.value.(*HostQueue).Push(req.URI)
 	}
 	// Send signal to create x new Threads
 	// if there's extra items not being proccessed
@@ -150,40 +159,39 @@ func (u *URLQueue) Push(uri *url.URL) {
 	}
 }
 
-func (u *URLQueue) Pop() *url.URL {
+func (u *RequestQueue) Pop() *url.URL {
 	u.Lock()
 	defer u.Unlock()
 
 	// Get most prioritozed host
 	item := u.queue.Peek().(*PQueueItem)
 	// Get it's uri
-	uri := item.value.(*Host).Pop()
+	uri := item.value.(*HostQueue).Pop()
 	// if host queue is empty delete it from heap else update heap
-	if item.value.(*Host).Len() == 0 {
-		// Needs to be heap.Remove for some reason ?
+	if item.value.(*HostQueue).Len() == 0 {
 		heap.Remove(u.queue, item.index)
 	} else {
-		u.queue.Update(item, item.value, int(item.value.(*Host).LastVisit.Unix()))
+		u.queue.Update(item, item.value, int(item.value.(*HostQueue).LastVisit.Unix()))
 	}
 
 	return uri
 }
 
-func (u *URLQueue) Len() int {
+func (u *RequestQueue) Len() int {
 	u.Lock()
 	defer u.Unlock()
 
 	return u.queue.Len()
 }
 
-func (u *URLQueue) AddThread() {
+func (u *RequestQueue) AddThread() {
 	u.Lock()
 	defer u.Unlock()
 
 	u.threads++
 }
 
-func (u *URLQueue) RemoveThread() {
+func (u *RequestQueue) RemoveThread() {
 	u.Lock()
 	defer u.Unlock()
 
