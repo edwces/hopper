@@ -78,6 +78,7 @@ func NewHostQueue(delay time.Duration) *HostQueue {
 	}
 }
 
+// Pop sleeps until it can returns url from HostQueue.
 func (h *HostQueue) Pop() *url.URL {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -91,6 +92,7 @@ func (h *HostQueue) Pop() *url.URL {
 	return uri
 }
 
+// Push adds new url to HostQueue.
 func (h *HostQueue) Push(uri *url.URL) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -129,45 +131,42 @@ func NewRequestQueue(max int) *RequestQueue {
 	return q
 }
 
+// Pushes requests to HostQueues and creates them if necessary.
+// It also sends to channel when it should create new threads.
 func (u *RequestQueue) Push(req *Request) {
 	u.Lock()
 	defer u.Unlock()
 
 	if !u.seen[req.URI.String()] {
+        // NOTE HOST items needs to exist all the time
 		item, exists := u.hostmap[req.URI.Hostname()]
 		if !exists {
-			// NOTE HOST items needs to exist all the time
 			host := NewHostQueue(req.Delay)
 			item = &PQueueItem{value: host, priority: int(host.LastVisit.Unix())}
 			u.hostmap[req.URI.Hostname()] = item
 			heap.Push(u.queue, item)
-			// When we remove heap item we still store it in map for later use
 		} else if item.value.(*HostQueue).Len() == 0 {
+			// When we remove heap item we still store it in map for later use
 			heap.Push(u.queue, item)
 		}
 
 		u.seen[req.URI.String()] = true
 		item.value.(*HostQueue).Push(req.URI)
 	}
-	// Send signal to create x new Threads
-	// if there's extra items not being proccessed
-	// concurrently and if we have free Threads
 	balance := u.queue.Len() - u.threads
 	if balance > 0 && u.threads < u.max {
 		u.Free <- int(math.Min(float64(balance), float64(u.max-u.threads)))
-		// NOTE: Maybe wait here for all threads to spawn
 	}
 }
 
+// Pop returns url from most prioritorized HostQueue and updates heap tree.
 func (u *RequestQueue) Pop() *url.URL {
 	u.Lock()
 	defer u.Unlock()
 
-	// Get most prioritozed host
 	item := u.queue.Peek().(*PQueueItem)
-	// Get it's uri
 	uri := item.value.(*HostQueue).Pop()
-	// if host queue is empty delete it from heap else update heap
+
 	if item.value.(*HostQueue).Len() == 0 {
 		heap.Remove(u.queue, item.index)
 	} else {

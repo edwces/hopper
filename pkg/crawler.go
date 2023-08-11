@@ -12,13 +12,13 @@ import (
 	"golang.org/x/net/html"
 )
 
+// NOTE: might be better to refactor Worker proccess into it's own class
+// but this way we would also need some easy way to copy config
+
 const (
 	DefaultUserAgent = "hopper/0.1"
 	DefaultDelay     = time.Second * 15
 )
-
-// NOTE: might be better to refactor Worker proccess into it's own class
-// but this way we would also need some easy way to copy config
 
 type Crawler struct {
 	sync.Mutex
@@ -41,7 +41,6 @@ func (c *Crawler) Init() {
 	if c.Delay == 0 {
 		c.Delay = DefaultDelay
 	}
-
 	if c.OnParse == nil {
 		c.OnParse = func(r *http.Response, n *html.Node) {}
 	}
@@ -49,7 +48,7 @@ func (c *Crawler) Init() {
 	c.queue = NewRequestQueue(c.Threads)
 }
 
-// Traverse uses depth-first search for link traversal.
+// Run is responsible for creating crawler workers.
 func (c *Crawler) Run(seeds ...string) {
 	for _, seed := range seeds {
 		if uri, err := url.Parse(seed); err == nil {
@@ -57,7 +56,6 @@ func (c *Crawler) Run(seeds ...string) {
 		}
 	}
 
-	// For each free place in queue create new Worker
 	for free := range c.queue.Free {
 		for i := 0; i < free; i++ {
 			go c.StartNewWorker()
@@ -65,18 +63,21 @@ func (c *Crawler) Run(seeds ...string) {
 	}
 }
 
+// StartNewWorker starts a new work loop.
 func (c *Crawler) StartNewWorker() {
 	c.queue.AddThread()
 	c.Traverse()
 	c.queue.RemoveThread()
 }
 
+// Traverse starts crawl proccess until all links have been crawled.
 func (c *Crawler) Traverse() {
 	for c.queue.Len() != 0 {
 		c.Visit(c.queue.Pop())
 	}
 }
 
+// Visit proccesses given url
 func (c *Crawler) Visit(uri *url.URL) {
 	res, err := c.Fetch(uri)
 
@@ -98,7 +99,6 @@ func (c *Crawler) Visit(uri *url.URL) {
 
 	c.OnParse(res, doc)
 
-	// Extract uri's from document.
 	var f func(*html.Node)
 	f = func(n *html.Node) {
 		if n.Type == html.ElementNode && n.Data == "a" {
@@ -125,6 +125,7 @@ func (c *Crawler) Visit(uri *url.URL) {
 	f(doc)
 }
 
+// Fetch requests the uri and adds custom user defined headers.
 func (c *Crawler) Fetch(uri *url.URL) (*http.Response, error) {
 	req, err := http.NewRequest("GET", uri.String(), nil)
 	if err != nil {
@@ -139,6 +140,7 @@ func (c *Crawler) Fetch(uri *url.URL) (*http.Response, error) {
 	return res, nil
 }
 
+// NewRequest creates new crawl request.
 func (c *Crawler) NewRequest(uri *url.URL) *Request {
 	return &Request{URI: uri, Delay: c.Delay}
 }
