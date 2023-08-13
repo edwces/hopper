@@ -4,7 +4,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -15,11 +14,6 @@ import (
 // NOTE: might be better to refactor Worker proccess into it's own class
 // but this way we would also need some easy way to copy config
 
-const (
-	DefaultUserAgent = "hopper/0.1"
-	DefaultDelay     = time.Second * 15
-)
-
 type Crawler struct {
 	sync.Mutex
 	UserAgent string
@@ -27,32 +21,27 @@ type Crawler struct {
 	Threads   int
 	Delay     time.Duration
 
-	queue *RequestQueue
+	queue *URLQueue
+    request *Request
 }
 
 // Init initializes default values for crawler.
 func (c *Crawler) Init() {
-	if c.UserAgent == "" {
-		c.UserAgent = DefaultUserAgent
-	}
-	if c.Threads == 0 {
-		c.Threads = runtime.GOMAXPROCS(0)
-	}
-	if c.Delay == 0 {
-		c.Delay = DefaultDelay
-	}
 	if c.OnParse == nil {
 		c.OnParse = func(r *http.Response, n *html.Node) {}
 	}
 
-	c.queue = NewRequestQueue(c.Threads)
+    c.queue = &URLQueue{max: c.Threads}
+    c.queue.Init()
+    c.request = &Request{UserAgent: c.UserAgent, Delay: c.Delay}
+    c.request.Init()
 }
 
 // Run is responsible for creating crawler workers.
 func (c *Crawler) Run(seeds ...string) {
 	for _, seed := range seeds {
 		if uri, err := url.Parse(seed); err == nil {
-			go c.queue.Push(c.NewRequest(uri))
+			go c.queue.Push(uri, c.request.Delay)
 		}
 	}
 
@@ -73,13 +62,14 @@ func (c *Crawler) StartNewWorker() {
 // Traverse starts crawl proccess until all links have been crawled.
 func (c *Crawler) Traverse() {
 	for c.queue.Len() != 0 {
-		c.Visit(c.queue.Pop())
+        req := c.request.New("GET", c.queue.Pop())
+		c.Visit(req)
 	}
 }
 
 // Visit proccesses given url
-func (c *Crawler) Visit(uri *url.URL) {
-	res, err := c.Fetch(uri)
+func (c *Crawler) Visit(req *Request) {
+	res, err := req.Do()
 
 	if res != nil {
 		defer res.Body.Close()
@@ -108,12 +98,12 @@ func (c *Crawler) Visit(uri *url.URL) {
 					if err != nil {
 						continue
 					}
-					resolved := uri.ResolveReference(discovery)
+					resolved := req.URL.ResolveReference(discovery)
 					if !validURI(resolved) {
 						continue
 					}
 
-					c.queue.Push(c.NewRequest(resolved))
+					c.queue.Push(resolved, c.request.Delay)
 
 				}
 			}
@@ -123,26 +113,6 @@ func (c *Crawler) Visit(uri *url.URL) {
 		}
 	}
 	f(doc)
-}
-
-// Fetch requests the uri and adds custom user defined headers.
-func (c *Crawler) Fetch(uri *url.URL) (*http.Response, error) {
-	req, err := http.NewRequest("GET", uri.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", c.UserAgent)
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return res, err
-	}
-
-	return res, nil
-}
-
-// NewRequest creates new crawl request.
-func (c *Crawler) NewRequest(uri *url.URL) *Request {
-	return &Request{URI: uri, Delay: c.Delay}
 }
 
 func validURI(uri *url.URL) bool {
