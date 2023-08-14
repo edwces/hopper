@@ -47,16 +47,9 @@ func (c *Crawler) Run(seeds ...string) {
 
 	for free := range c.queue.Free {
 		for i := 0; i < free; i++ {
-			go c.StartNewWorker()
+			go c.Traverse()
 		}
 	}
-}
-
-// StartNewWorker starts a new work loop.
-func (c *Crawler) StartNewWorker() {
-	c.queue.AddThread()
-	c.Traverse()
-	c.queue.RemoveThread()
 }
 
 // Traverse starts crawl proccess until all links have been crawled.

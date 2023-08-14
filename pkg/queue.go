@@ -106,7 +106,6 @@ func (u *URLQueue) Init() {
 	if u.max == 0 {
         u.max = runtime.GOMAXPROCS(0)
     }
-
 	u.queue = &PQueue{}
 	u.itemMap = map[string]*PQueueItem{}
 	u.seen = map[string]bool{}
@@ -122,16 +121,16 @@ func (u *URLQueue) Push(uri *url.URL, delay time.Duration) {
 	defer u.Unlock()
 
 	if !u.seen[uri.String()] {
-        hqueue := u.getHostQueue(uri, delay)
-		hqueue.Push(uri)
+        hq := u.getHostQueue(uri, delay)
+		hq.Push(uri)
 		u.seen[uri.String()] = true
 	}
 
 	balance := u.queue.Len() - u.threads
 	if balance > 0 && u.threads < u.max {
-        // BUG: This part is not synchronized correctly
-        // It can send multiple messages before workers will increase number of threads
-		u.Free <- int(math.Min(float64(balance), float64(u.max-u.threads)))
+        free := int(math.Min(float64(balance), float64(u.max-u.threads)))
+        u.threads += free 
+		u.Free <- free
 	}
 }
 
@@ -149,6 +148,15 @@ func (u *URLQueue) Pop() *url.URL {
 		u.queue.Update(item, item.value, int(item.value.(*DelayedQueue).clock.Unix()))
 	}
 
+    balance := u.queue.Len() - u.threads
+    if balance < 0 && u.threads <= u.max {
+        u.threads += balance
+        // add WaitGroup for safety
+        if u.threads == 0 {
+		    close(u.Free)
+	    }
+    }
+
 	return uri
 }
 
@@ -162,9 +170,9 @@ func (u *URLQueue) getHostQueue(uri *url.URL, delay time.Duration) *DelayedQueue
         u.itemMap[uri.Hostname()] = item
         heap.Push(u.queue, item)
     } else if item.value.(*DelayedQueue).Len() == 0 {
-        // When we remove heap item we still store it in map for later use
         heap.Push(u.queue, item)
     }
+
     return item.value.(*DelayedQueue)
 }
 
@@ -173,22 +181,4 @@ func (u *URLQueue) Len() int {
 	defer u.Unlock()
 
 	return u.queue.Len()
-}
-
-func (u *URLQueue) AddThread() {
-	u.Lock()
-	defer u.Unlock()
-
-	u.threads++
-}
-
-func (u *URLQueue) RemoveThread() {
-	u.Lock()
-	defer u.Unlock()
-
-	u.threads--
-
-	if u.threads == 0 {
-		close(u.Free)
-	}
 }
