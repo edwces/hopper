@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"golang.org/x/net/html"
@@ -15,7 +14,6 @@ import (
 // but this way we would also need some easy way to copy config
 
 type Crawler struct {
-	sync.Mutex
 	UserAgent string
 	OnParse   func(*http.Response, *html.Node)
 	Threads   int
@@ -39,6 +37,10 @@ func (c *Crawler) Init() {
 
 // Run is responsible for creating crawler workers.
 func (c *Crawler) Run(seeds ...string) {
+    if len(seeds) == 0 {
+        panic("Cannot run crawler without seeds")
+    }
+
 	for _, seed := range seeds {
 		if uri, err := url.Parse(seed); err == nil {
 			go c.queue.Push(uri, c.request.Delay)
