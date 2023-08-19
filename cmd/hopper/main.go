@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"net/http"
 
 	hopper "github.com/edwces/hopper/pkg"
 	"golang.org/x/net/html"
@@ -12,10 +11,10 @@ import (
 func main() {
 	crawler := hopper.Crawler{}
 
-    crawler.OnParse = func(res *http.Response, n *html.Node) {
-        fmt.Println(res.Request.URL.String()) 
-    }
+	crawler.OnParse = func(res *hopper.Response, n *html.Node) {
+		fmt.Println(res.Req.URL.String())
+	}
 
 	crawler.Init()
-	crawler.Run("https://crawler-test.com/redirects/redirect_1")
+	crawler.Run("https://en.wikipedia.org/wiki/Main_Page")
 }

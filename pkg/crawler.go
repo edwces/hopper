@@ -1,10 +1,7 @@
 package hopper
 
 import (
-	"io"
-	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"golang.org/x/net/html"
@@ -15,7 +12,7 @@ import (
 
 type Crawler struct {
 	UserAgent string
-	OnParse   func(*http.Response, *html.Node)
+	OnParse   func(*Response, *html.Node)
 	Threads   int
 	Delay     time.Duration
 
@@ -26,13 +23,14 @@ type Crawler struct {
 // Init initializes default values for crawler.
 func (c *Crawler) Init() {
 	if c.OnParse == nil {
-		c.OnParse = func(r *http.Response, n *html.Node) {}
+		c.OnParse = func(r *Response, n *html.Node) {}
 	}
 
-    c.queue = &URLQueue{max: c.Threads}
+    c.queue = &URLQueue{Max: c.Threads}
     c.queue.Init()
     c.request = &Request{UserAgent: c.UserAgent, Delay: c.Delay}
     c.request.Init()
+    
 }
 
 // Run is responsible for creating crawler workers.
@@ -64,55 +62,26 @@ func (c *Crawler) Traverse() {
 
 // Visit proccesses given url
 func (c *Crawler) Visit(req *Request) {
-	res, err := req.Do()
+	httpRes, err := req.Do()
+	if err != nil {
+		return
+	}
+    
+    res := &Response{Body: httpRes.Body, Req: req}
+    defer res.Close()
 
-	if res != nil {
-		defer res.Body.Close()
-	}
+    doc, err := res.Parse()
 	if err != nil {
 		return
-	}
-
-	bytes, err := io.ReadAll(res.Body)
-	if err != nil {
-		return
-	}
-	doc, err := html.Parse(strings.NewReader(string(bytes)))
-	if err != nil {
-		return
-	}
+    }
 
 	c.OnParse(res, doc)
 
-	var f func(*html.Node)
-	f = func(n *html.Node) {
-		if n.Type == html.ElementNode && n.Data == "a" {
-			for _, attr := range n.Attr {
-				if attr.Key == "href" {
-					discovery, err := url.Parse(attr.Val)
-					if err != nil {
-						continue
-					}
-					resolved := req.URL.ResolveReference(discovery)
-					if !validURI(resolved) {
-						continue
-					}
-
-					c.queue.Push(resolved, c.request.Delay)
-
-				}
-			}
-		}
-		for ch := n.FirstChild; ch != nil; ch = ch.NextSibling {
-			f(ch)
-		}
-	}
-	f(doc)
+    discovered := res.Discover(doc)
+    for _, discovery := range discovered {
+        go c.queue.Push(discovery, req.Delay)
+    }
+    
 }
 
-func validURI(uri *url.URL) bool {
-	if uri.Scheme != "http" && uri.Scheme != "https" {
-		return false
-	}
-	return true
-}
+

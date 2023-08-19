@@ -94,17 +94,17 @@ type URLQueue struct {
 	sync.Mutex
 
 	Free chan int
+	Max     int
 
 	threads int
-	max     int
 	queue   *PQueue
 	itemMap map[string]*PQueueItem
 	seen    map[string]bool
 }
 
 func (u *URLQueue) Init() {
-	if u.max == 0 {
-        u.max = runtime.GOMAXPROCS(0)
+	if u.Max == 0 {
+        u.Max = runtime.GOMAXPROCS(0)
     }
 	u.queue = &PQueue{}
 	u.itemMap = map[string]*PQueueItem{}
@@ -127,8 +127,8 @@ func (u *URLQueue) Push(uri *url.URL, delay time.Duration) {
 	}
 
 	balance := u.queue.Len() - u.threads
-	if balance > 0 && u.threads < u.max {
-        free := int(math.Min(float64(balance), float64(u.max-u.threads)))
+	if balance > 0 && u.threads < u.Max {
+        free := int(math.Min(float64(balance), float64(u.Max-u.threads)))
         u.threads += free 
 		u.Free <- free
 	}
@@ -138,6 +138,10 @@ func (u *URLQueue) Push(uri *url.URL, delay time.Duration) {
 func (u *URLQueue) Pop() *url.URL {
 	u.Lock()
 	defer u.Unlock()
+
+    if u.threads == 0 {
+		close(u.Free)
+	}
 
 	item := u.queue.Peek().(*PQueueItem)
 	uri := item.value.(*DelayedQueue).Pop()
@@ -149,12 +153,8 @@ func (u *URLQueue) Pop() *url.URL {
 	}
 
     balance := u.queue.Len() - u.threads
-    if balance < 0 && u.threads <= u.max {
+    if balance < 0 && u.threads <= u.Max {
         u.threads += balance
-        // add WaitGroup for safety
-        if u.threads == 0 {
-		    close(u.Free)
-	    }
     }
 
 	return uri

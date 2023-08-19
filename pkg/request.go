@@ -44,5 +44,3 @@ func (req *Request) Do() (*http.Response, error) {
 
     return http.DefaultClient.Do(httpReq)
 }
-
-
