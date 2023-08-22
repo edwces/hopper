@@ -56,14 +56,8 @@ func (req *Request) Init() {
 
     req.Headers = map[string]string{}
     req.Properties = map[string]any{}
-
-    if req.Properties["Delay"] == nil {
-        req.Properties["Delay"] = DefaultDelay 
-    }
-    if req.Headers["User-Agent"] == "" {
-		req.Headers["User-Agent"] = DefaultUserAgent
-	}
 }
+
 
 func (req *Request) Do() []*Request {
     defer req.End()

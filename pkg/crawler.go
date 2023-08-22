@@ -1,35 +1,50 @@
 package hopper
 
 import (
-	"fmt"
 	"net/url"
 	"time"
 )
 
-// NOTE: might be better to refactor Worker proccess into it's own class
-// but this way we would also need some easy way to copy config
-
 type Crawler struct {
-	Threads   int
+	Concurrency int
+    Delay time.Duration
+    UserAgent string
 
-	queue *URLQueue
-    request *Request
+	queue   *URLQueue
+	request *Request
+
+	BeforeRequest func(*Request)
+	AfterRequest  func(*Request)
+	BeforeParse   func(*Request)
+	AfterParse    func(*Request)
+	BeforeFetch   func(*Request)
+	AfterFetch    func(*Request)
 }
 
 // Init initializes default values for crawler.
 func (c *Crawler) Init() {
-    c.queue = &URLQueue{Max: c.Threads}
-    c.queue.Init()
-    c.request = &Request{BeforeRequest: func(r *Request) {fmt.Println(r.URL.String())}}
-    c.request.Init()
-    
+	c.queue = &URLQueue{Max: c.Concurrency}
+	c.queue.Init()
+	c.request = &Request{BeforeRequest: c.BeforeRequest, AfterRequest: c.AfterRequest, BeforeFetch: c.BeforeFetch, AfterFetch: c.AfterFetch, BeforeParse: c.BeforeParse, AfterParse: c.AfterParse}
+	c.request.Init()
+
+    c.request.Properties["Delay"] = c.Delay
+	c.request.Headers["User-Agent"] = c.UserAgent
+
+    if c.Delay == 0 {
+        c.request.Properties["Delay"] = DefaultDelay 
+    }
+    if c.UserAgent == "" {
+		c.request.Headers["User-Agent"] = DefaultUserAgent
+	}
+
 }
 
 // Run is responsible for creating crawler workers.
 func (c *Crawler) Run(seeds ...string) {
-    if len(seeds) == 0 {
-        panic("Cannot run crawler without seeds")
-    }
+	if len(seeds) == 0 {
+		panic("Cannot run crawler without seeds")
+	}
 
 	for _, seed := range seeds {
 		if uri, err := url.Parse(seed); err == nil {
@@ -47,11 +62,11 @@ func (c *Crawler) Run(seeds ...string) {
 // Traverse starts crawl proccess until all links have been crawled.
 func (c *Crawler) Traverse() {
 	for c.queue.Len() != 0 {
-        req := c.request.New("GET", c.queue.Pop())
-        discovered := req.Do()
+		req := c.request.New("GET", c.queue.Pop())
+		discovered := req.Do()
 
-        for _, discovery := range discovered {
-            c.queue.Push(discovery.URL, discovery.Properties["Delay"].(time.Duration))
-        }
+		for _, discovery := range discovered {
+			c.queue.Push(discovery.URL, discovery.Properties["Delay"].(time.Duration))
+		}
 	}
 }
