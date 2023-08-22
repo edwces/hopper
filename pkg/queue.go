@@ -58,7 +58,7 @@ func (pq *PQueue) Peek() any {
 
 type DelayedQueue struct {
 	delay time.Duration
-    clock time.Time
+	clock time.Time
 	queue []*url.URL
 }
 
@@ -94,7 +94,7 @@ type URLQueue struct {
 	sync.Mutex
 
 	Free chan int
-	Max     int
+	Max  int
 
 	threads int
 	queue   *PQueue
@@ -104,8 +104,8 @@ type URLQueue struct {
 
 func (u *URLQueue) Init() {
 	if u.Max == 0 {
-        u.Max = runtime.GOMAXPROCS(0)
-    }
+		u.Max = runtime.GOMAXPROCS(0)
+	}
 	u.queue = &PQueue{}
 	u.itemMap = map[string]*PQueueItem{}
 	u.seen = map[string]bool{}
@@ -121,15 +121,15 @@ func (u *URLQueue) Push(uri *url.URL, delay time.Duration) {
 	defer u.Unlock()
 
 	if !u.seen[uri.String()] {
-        hq := u.getHostQueue(uri, delay)
+		hq := u.getHostQueue(uri, delay)
 		hq.Push(uri)
 		u.seen[uri.String()] = true
 	}
 
 	balance := u.queue.Len() - u.threads
 	if balance > 0 && u.threads < u.Max {
-        free := int(math.Min(float64(balance), float64(u.Max-u.threads)))
-        u.threads += free 
+		free := int(math.Min(float64(balance), float64(u.Max-u.threads)))
+		u.threads += free
 		u.Free <- free
 	}
 }
@@ -139,7 +139,7 @@ func (u *URLQueue) Pop() *url.URL {
 	u.Lock()
 	defer u.Unlock()
 
-    if u.threads == 0 {
+	if u.threads == 0 {
 		close(u.Free)
 	}
 
@@ -152,10 +152,10 @@ func (u *URLQueue) Pop() *url.URL {
 		u.queue.Update(item, item.value, int(item.value.(*DelayedQueue).clock.Unix()))
 	}
 
-    balance := u.queue.Len() - u.threads
-    if balance < 0 && u.threads <= u.Max {
-        u.threads += balance
-    }
+	balance := u.queue.Len() - u.threads
+	if balance < 0 && u.threads <= u.Max {
+		u.threads += balance
+	}
 
 	return uri
 }
@@ -163,17 +163,17 @@ func (u *URLQueue) Pop() *url.URL {
 // getHostQueue returns DelayedQueue for equivalent hostname and creates it,
 // if one does not exists.
 func (u *URLQueue) getHostQueue(uri *url.URL, delay time.Duration) *DelayedQueue {
-    item, exists := u.itemMap[uri.Hostname()]
-    if !exists {
-        queue := NewDelayedQueue(delay)
-        item = &PQueueItem{value: queue, priority: int(queue.clock.Unix())}
-        u.itemMap[uri.Hostname()] = item
-        heap.Push(u.queue, item)
-    } else if item.value.(*DelayedQueue).Len() == 0 {
-        heap.Push(u.queue, item)
-    }
+	item, exists := u.itemMap[uri.Hostname()]
+	if !exists {
+		queue := NewDelayedQueue(delay)
+		item = &PQueueItem{value: queue, priority: int(queue.clock.Unix())}
+		u.itemMap[uri.Hostname()] = item
+		heap.Push(u.queue, item)
+	} else if item.value.(*DelayedQueue).Len() == 0 {
+		heap.Push(u.queue, item)
+	}
 
-    return item.value.(*DelayedQueue)
+	return item.value.(*DelayedQueue)
 }
 
 func (u *URLQueue) Len() int {
