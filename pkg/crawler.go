@@ -2,7 +2,6 @@ package hopper
 
 import (
 	"math"
-	"net/url"
 	"time"
 )
 
@@ -63,13 +62,11 @@ func (c *Crawler) Run(seeds ...string) {
 	}
 
 	for _, seed := range seeds {
-		if uri, err := url.Parse(seed); err == nil {
-			req, err := c.request.New("GET", uri)
-			if err != nil {
-				continue
-			}
-			go c.queue.Push(req)
+		req, err := c.request.New("GET", seed)
+		if err != nil {
+			continue
 		}
+		go c.queue.Push(req)
 	}
 
 	for free := range c.queue.Free {

@@ -56,6 +56,7 @@ func (req *Request) Init() {
 		req.AfterParse = func(r *Request) {}
 	}
 
+	req.URL = &url.URL{}
 	req.Headers = map[string]string{}
 	req.Properties = map[string]any{}
 	req.Depth = -1
@@ -70,8 +71,17 @@ func (req *Request) Do() []*Request {
 	return req.Discover()
 }
 
-func (req Request) New(method string, uri *url.URL) (*Request, error) {
-	req.URL = uri
+func (req Request) New(method string, uri string) (*Request, error) {
+	parsed, err := req.URL.Parse(uri)
+	if err != nil {
+		return nil, err
+	}
+	if !parsed.IsAbs() {
+		return nil, errors.New("Relative url can't be resolved")
+	}
+	parsed.Fragment = ""
+
+	req.URL = parsed
 	req.Method = method
 	req.Response = nil
 	req.Document = nil
@@ -135,11 +145,7 @@ func (req *Request) Discover() []*Request {
 		if n.Type == html.ElementNode && n.Data == "a" {
 			for _, attr := range n.Attr {
 				if attr.Key == "href" {
-					discovery, err := url.Parse(attr.Val)
-					if err != nil {
-						continue
-					}
-					resolved, err := req.New("GET", req.URL.ResolveReference(discovery))
+					resolved, err := req.New("GET", attr.Val)
 					if err != nil {
 						continue
 					}
