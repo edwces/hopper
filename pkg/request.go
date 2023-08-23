@@ -19,6 +19,7 @@ const (
 type Request struct {
 	Method string
 	URL    *url.URL
+	Depth  int
 
 	Response *http.Response
 	Document *html.Node
@@ -57,6 +58,7 @@ func (req *Request) Init() {
 
 	req.Headers = map[string]string{}
 	req.Properties = map[string]any{}
+	req.Depth = -1
 }
 
 func (req *Request) Do() []*Request {
@@ -71,6 +73,9 @@ func (req *Request) Do() []*Request {
 func (req Request) New(method string, uri *url.URL) (*Request, error) {
 	req.URL = uri
 	req.Method = method
+	req.Response = nil
+	req.Document = nil
+	req.Depth++
 
 	if !req.Valid() {
 		return nil, errors.New("Invalid request")
@@ -153,6 +158,10 @@ func (req *Request) Discover() []*Request {
 
 func (req *Request) Valid() bool {
 	if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+		return false
+	}
+
+	if req.Depth > req.Properties["AllowedDepth"].(int) {
 		return false
 	}
 

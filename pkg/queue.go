@@ -3,7 +3,6 @@ package hopper
 import (
 	"container/heap"
 	"math"
-	"net/url"
 	"runtime"
 	"sync"
 	"time"
@@ -57,33 +56,25 @@ func (pq *PQueue) Peek() any {
 }
 
 type DelayedQueue struct {
-	delay time.Duration
 	clock time.Time
-	queue []*url.URL
-}
-
-func NewDelayedQueue(delay time.Duration) *DelayedQueue {
-	return &DelayedQueue{
-		clock: time.Now().Add(-delay),
-		delay: delay,
-		queue: []*url.URL{},
-	}
+	queue []*Request
 }
 
 // Pop sleeps until it can returns url from HostQueue.
-func (h *DelayedQueue) Pop() *url.URL {
-	time.Sleep(time.Until(h.clock.Add(h.delay)))
-	h.clock = time.Now()
+func (h *DelayedQueue) Pop() *Request {
 
-	uri := h.queue[len(h.queue)-1]
+	req := h.queue[len(h.queue)-1]
 	h.queue = h.queue[:len(h.queue)-1]
 
-	return uri
+	time.Sleep(time.Until(h.clock.Add(req.Properties["Delay"].(time.Duration))))
+	h.clock = time.Now()
+
+	return req
 }
 
 // Push adds new url to HostQueue.
-func (h *DelayedQueue) Push(uri *url.URL) {
-	h.queue = append(h.queue, uri)
+func (h *DelayedQueue) Push(req *Request) {
+	h.queue = append(h.queue, req)
 }
 
 func (h *DelayedQueue) Len() int {
@@ -116,14 +107,14 @@ func (u *URLQueue) Init() {
 
 // Pushes requests to HostQueues and creates them if necessary.
 // It also sends to channel when it should create new threads.
-func (u *URLQueue) Push(uri *url.URL, delay time.Duration) {
+func (u *URLQueue) Push(req *Request) {
 	u.Lock()
 	defer u.Unlock()
 
-	if !u.seen[uri.String()] {
-		hq := u.getHostQueue(uri, delay)
-		hq.Push(uri)
-		u.seen[uri.String()] = true
+	if !u.seen[req.URL.String()] {
+		hq := u.getHostQueue(req)
+		hq.Push(req)
+		u.seen[req.URL.String()] = true
 	}
 
 	balance := u.queue.Len() - u.threads
@@ -135,7 +126,7 @@ func (u *URLQueue) Push(uri *url.URL, delay time.Duration) {
 }
 
 // Pop returns url from most prioritorized HostQueue and updates heap tree.
-func (u *URLQueue) Pop() *url.URL {
+func (u *URLQueue) Pop() *Request {
 	u.Lock()
 	defer u.Unlock()
 
@@ -144,7 +135,7 @@ func (u *URLQueue) Pop() *url.URL {
 	}
 
 	item := u.queue.Peek().(*PQueueItem)
-	uri := item.value.(*DelayedQueue).Pop()
+	req := item.value.(*DelayedQueue).Pop()
 
 	if item.value.(*DelayedQueue).Len() == 0 {
 		heap.Remove(u.queue, item.index)
@@ -157,17 +148,17 @@ func (u *URLQueue) Pop() *url.URL {
 		u.threads += balance
 	}
 
-	return uri
+	return req
 }
 
 // getHostQueue returns DelayedQueue for equivalent hostname and creates it,
 // if one does not exists.
-func (u *URLQueue) getHostQueue(uri *url.URL, delay time.Duration) *DelayedQueue {
-	item, exists := u.itemMap[uri.Hostname()]
+func (u *URLQueue) getHostQueue(req *Request) *DelayedQueue {
+	item, exists := u.itemMap[req.URL.Hostname()]
 	if !exists {
-		queue := NewDelayedQueue(delay)
+		queue := &DelayedQueue{queue: []*Request{}}
 		item = &PQueueItem{value: queue, priority: int(queue.clock.Unix())}
-		u.itemMap[uri.Hostname()] = item
+		u.itemMap[req.URL.Hostname()] = item
 		heap.Push(u.queue, item)
 	} else if item.value.(*DelayedQueue).Len() == 0 {
 		heap.Push(u.queue, item)

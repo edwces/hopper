@@ -1,6 +1,7 @@
 package hopper
 
 import (
+	"math"
 	"net/url"
 	"time"
 )
@@ -11,6 +12,7 @@ type Crawler struct {
 	UserAgent         string
 	AllowedDomains    []string
 	DisallowedDomains []string
+	AllowedDepth      int
 
 	queue   *URLQueue
 	request *Request
@@ -33,6 +35,7 @@ func (c *Crawler) Init() {
 	c.request.Properties["Delay"] = c.Delay
 	c.request.Properties["AllowedDomains"] = c.AllowedDomains
 	c.request.Properties["DisallowedDomains"] = c.DisallowedDomains
+	c.request.Properties["AllowedDepth"] = c.AllowedDepth
 	c.request.Headers["User-Agent"] = c.UserAgent
 
 	if c.Delay == 0 {
@@ -47,6 +50,10 @@ func (c *Crawler) Init() {
 	if c.DisallowedDomains == nil {
 		c.request.Properties["DisallowedDomains"] = []string{}
 	}
+	if c.AllowedDepth == 0 {
+		c.request.Properties["AllowedDepth"] = math.MaxInt
+	}
+
 }
 
 // Run is responsible for creating crawler workers.
@@ -57,7 +64,11 @@ func (c *Crawler) Run(seeds ...string) {
 
 	for _, seed := range seeds {
 		if uri, err := url.Parse(seed); err == nil {
-			go c.queue.Push(uri, c.request.Properties["Delay"].(time.Duration))
+			req, err := c.request.New("GET", uri)
+			if err != nil {
+				continue
+			}
+			go c.queue.Push(req)
 		}
 	}
 
@@ -71,15 +82,12 @@ func (c *Crawler) Run(seeds ...string) {
 // Traverse starts crawl proccess until all links have been crawled.
 func (c *Crawler) Traverse() {
 	for c.queue.Len() != 0 {
-		req, err := c.request.New("GET", c.queue.Pop())
-		if err != nil {
-			continue
-		}
+		req := c.queue.Pop()
 
 		discovered := req.Do()
 
 		for _, discovery := range discovered {
-			c.queue.Push(discovery.URL, discovery.Properties["Delay"].(time.Duration))
+			c.queue.Push(discovery)
 		}
 	}
 }
