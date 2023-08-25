@@ -2,10 +2,8 @@ package hopper
 
 import (
 	"errors"
-	"io"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"golang.org/x/net/html"
@@ -75,6 +73,7 @@ func (req Request) New(method string, uri string) (*Request, error) {
 	parsed, err := req.URL.Parse(uri)
 	if err != nil {
 		return nil, err
+        
 	}
 	if !parsed.IsAbs() {
 		return nil, errors.New("Relative url can't be resolved")
@@ -111,6 +110,13 @@ func (req *Request) Fetch() {
 	if err != nil {
 		return
 	}
+
+    // Naive checking for content length as some website don't return this header
+    // TODO: Implement MaxBytesReader on req.Body
+    if httpRes.ContentLength != -1 && httpRes.ContentLength < req.Properties["ContentLength"].(int64) {
+        return
+    } 
+
 	req.Response = httpRes
 }
 
@@ -122,11 +128,7 @@ func (req *Request) Parse() {
 	req.BeforeParse(req)
 	defer req.AfterParse(req)
 
-	bytes, err := io.ReadAll(req.Response.Body)
-	if err != nil {
-		return
-	}
-	doc, err := html.Parse(strings.NewReader(string(bytes)))
+	doc, err := html.Parse(req.Response.Body)
 	if err != nil {
 		return
 	}

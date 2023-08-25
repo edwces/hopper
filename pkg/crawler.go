@@ -12,6 +12,7 @@ type Crawler struct {
 	AllowedDomains    []string
 	DisallowedDomains []string
 	AllowedDepth      int
+	ContentLength     int64
 
 	queue   *URLQueue
 	request *Request
@@ -35,6 +36,7 @@ func (c *Crawler) Init() {
 	c.request.Properties["AllowedDomains"] = c.AllowedDomains
 	c.request.Properties["DisallowedDomains"] = c.DisallowedDomains
 	c.request.Properties["AllowedDepth"] = c.AllowedDepth
+	c.request.Properties["ContentLength"] = c.ContentLength
 	c.request.Headers["User-Agent"] = c.UserAgent
 
 	if c.Delay == 0 {
@@ -51,6 +53,9 @@ func (c *Crawler) Init() {
 	}
 	if c.AllowedDepth == 0 {
 		c.request.Properties["AllowedDepth"] = math.MaxInt
+	}
+	if c.ContentLength == 0 {
+		c.request.Properties["ContentLength"] = int64(4000000) 
 	}
 
 }
