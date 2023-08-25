@@ -2,6 +2,7 @@ package hopper
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
@@ -20,7 +21,6 @@ type Request struct {
 	Depth  int
 
 	Response *http.Response
-	Document *html.Node
 
 	Headers    map[string]string
 	Properties map[string]any
@@ -60,14 +60,22 @@ func (req *Request) Init() {
 	req.Depth = -1
 }
 
-func (req *Request) Do() []*Request {
+func (req *Request) Do() ([]*Request, error) {
 	defer req.End()
 
 	req.BeforeRequest(req)
-	req.Fetch()
-	req.Parse()
-	return req.Discover()
-}
+
+    res, err := req.Fetch()
+    if err != nil {
+        return nil, err
+    }
+    req.Response = res
+    doc, err := req.Parse(res.Body)
+    if err != nil {
+        return nil, err
+    }
+	return req.Discover(doc), nil
+} 
 
 func (req Request) New(method string, uri string) (*Request, error) {
 	parsed, err := req.URL.Parse(uri)
@@ -83,7 +91,6 @@ func (req Request) New(method string, uri string) (*Request, error) {
 	req.URL = parsed
 	req.Method = method
 	req.Response = nil
-	req.Document = nil
 	req.Depth++
 
 	if !req.Valid() {
@@ -93,13 +100,13 @@ func (req Request) New(method string, uri string) (*Request, error) {
 	return &req, nil
 }
 
-func (req *Request) Fetch() {
+func (req *Request) Fetch() (*http.Response, error) {
 	req.BeforeFetch(req)
 	defer req.AfterFetch(req)
 
 	httpReq, err := http.NewRequest(req.Method, req.URL.String(), nil)
 	if err != nil {
-		return
+		return nil, err
 	}
 
 	for h, val := range req.Headers {
@@ -108,40 +115,28 @@ func (req *Request) Fetch() {
 
 	httpRes, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
-		return
+		return nil, err
 	}
 
     // Naive checking for content length as some website don't return this header
     // TODO: Implement MaxBytesReader on req.Body
     if httpRes.ContentLength != -1 && httpRes.ContentLength < req.Properties["ContentLength"].(int64) {
-        return
+        return nil, errors.New("Exceeded maximum content length")
     } 
 
-	req.Response = httpRes
+	return httpRes, nil
 }
 
-func (req *Request) Parse() {
-	if req.Response == nil {
-		return
-	}
-
+func (req *Request) Parse(body io.Reader) (*html.Node, error) {
 	req.BeforeParse(req)
 	defer req.AfterParse(req)
 
-	doc, err := html.Parse(req.Response.Body)
-	if err != nil {
-		return
-	}
-	req.Document = doc
+	return html.Parse(body)
 }
 
-func (req *Request) Discover() []*Request {
+func (req *Request) Discover(node *html.Node) []*Request {
 	discovered := []*Request{}
 	var f func(*html.Node)
-
-	if req.Document == nil {
-		return discovered
-	}
 
 	f = func(n *html.Node) {
 		if n.Type == html.ElementNode && n.Data == "a" {
@@ -159,7 +154,7 @@ func (req *Request) Discover() []*Request {
 			f(ch)
 		}
 	}
-	f(req.Document)
+	f(node)
 
 	return discovered
 }

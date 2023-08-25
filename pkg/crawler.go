@@ -23,6 +23,8 @@ type Crawler struct {
 	AfterParse    func(*Request)
 	BeforeFetch   func(*Request)
 	AfterFetch    func(*Request)
+
+    OnError func(*Request, error)
 }
 
 // Init initializes default values for crawler.
@@ -31,6 +33,10 @@ func (c *Crawler) Init() {
 	c.queue.Init()
 	c.request = &Request{BeforeRequest: c.BeforeRequest, AfterRequest: c.AfterRequest, BeforeFetch: c.BeforeFetch, AfterFetch: c.AfterFetch, BeforeParse: c.BeforeParse, AfterParse: c.AfterParse}
 	c.request.Init()
+
+    if c.OnError == nil {
+        c.OnError = func(r *Request, err error) {}
+    }
 
 	c.request.Properties["Delay"] = c.Delay
 	c.request.Properties["AllowedDomains"] = c.AllowedDomains
@@ -86,7 +92,12 @@ func (c *Crawler) Traverse() {
 	for c.queue.Len() != 0 {
 		req := c.queue.Pop()
 
-		discovered := req.Do()
+		discovered, err := req.Do()
+
+        if err != nil {
+            c.OnError(req, err)
+            continue
+        }
 
 		for _, discovery := range discovered {
 			c.queue.Push(discovery)
