@@ -5,8 +5,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
+	"github.com/temoto/robotstxt"
 	"golang.org/x/net/html"
 )
 
@@ -63,6 +65,18 @@ func (req *Request) Init() {
 func (req *Request) Do() ([]*Request, error) {
 	defer req.End()
 
+    group, err := req.FetchRobots()
+    if err != nil {
+        return nil, err
+    }
+    if !group.Test(req.URL.Path) {
+        return nil, errors.New("Robots.txt excluded path")
+    }
+    // Set specific delay for this request
+    if group.CrawlDelay != 0 {
+        req.Properties["Delay"] = group.CrawlDelay
+    }
+
 	req.BeforeRequest(req)
 
     res, err := req.Fetch()
@@ -93,11 +107,52 @@ func (req Request) New(method string, uri string) (*Request, error) {
 	req.Response = nil
 	req.Depth++
 
+    // TEMP: Fix for delay, properties should probably be replaced with context
+    // Because of this currently crawl options will not work
+
+    // NOTE: Because properties are a map we are deep copying it to new request
+    newProperties := map[string]any{}
+    for k, v := range req.Properties {
+        newProperties[k] = v
+    }
+    newProperties["Delay"] = DefaultDelay
+
 	if !req.Valid() {
 		return nil, errors.New("Invalid request")
 	}
 
 	return &req, nil
+}
+
+func (req *Request) FetchRobots() (*robotstxt.Group, error) {
+    robotsMap := req.Properties["RobotsMap"].(*sync.Map)
+    group, exists := robotsMap.Load(req.URL.Hostname())
+    if !exists {
+        robotsURL := *req.URL
+        robotsURL.JoinPath("robots.txt")
+
+        httpReq, err := http.NewRequest(req.Method, req.URL.String(), nil)
+        if err != nil {
+            return nil, err
+        }
+
+        for h, val := range req.Headers {
+            httpReq.Header.Set(h, val)
+        }
+
+        httpRes, err := http.DefaultClient.Do(httpReq)
+        if err != nil {
+            return nil, err
+        }
+        robots, err := robotstxt.FromResponse(httpRes)
+        if err != nil {
+            return nil, err
+        }
+        group := robots.FindGroup(req.Headers["User-Agent"])
+        robotsMap.Store(req.URL.Hostname(), group)        
+        return group, nil
+    }
+    return group.(*robotstxt.Group), nil
 }
 
 func (req *Request) Fetch() (*http.Response, error) {

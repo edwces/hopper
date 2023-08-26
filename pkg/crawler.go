@@ -2,6 +2,7 @@ package hopper
 
 import (
 	"math"
+	"sync"
 	"time"
 )
 
@@ -44,6 +45,7 @@ func (c *Crawler) Init() {
 	c.request.Properties["AllowedDepth"] = c.AllowedDepth
 	c.request.Properties["ContentLength"] = c.ContentLength
 	c.request.Headers["User-Agent"] = c.UserAgent
+    c.request.Properties["RobotsMap"] = &sync.Map{}
 
 	if c.Delay == 0 {
 		c.request.Properties["Delay"] = DefaultDelay
