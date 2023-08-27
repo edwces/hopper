@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -197,6 +198,9 @@ func (req *Request) Discover(node *html.Node) []*Request {
 	f = func(n *html.Node) {
 		if n.Type == html.ElementNode && n.Data == "a" {
 			for _, attr := range n.Attr {
+                if attr.Key == "rel" && strings.Contains(attr.Val, "nofollow") {
+                    continue
+                }
 				if attr.Key == "href" {
 					resolved, err := req.New("GET", attr.Val)
 					if err != nil {
