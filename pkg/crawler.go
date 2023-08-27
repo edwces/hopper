@@ -2,6 +2,7 @@ package hopper
 
 import (
 	"math"
+	"net/http"
 	"sync"
 	"time"
 )
@@ -14,6 +15,7 @@ type Crawler struct {
 	DisallowedDomains []string
 	AllowedDepth      int
 	ContentLength     int64
+	Client            *http.Client
 
 	queue   *URLQueue
 	request *Request
@@ -25,7 +27,7 @@ type Crawler struct {
 	BeforeFetch   func(*Request)
 	AfterFetch    func(*Request)
 
-    OnError func(*Request, error)
+	OnError func(*Request, error)
 }
 
 // Init initializes default values for crawler.
@@ -35,9 +37,9 @@ func (c *Crawler) Init() {
 	c.request = &Request{BeforeRequest: c.BeforeRequest, AfterRequest: c.AfterRequest, BeforeFetch: c.BeforeFetch, AfterFetch: c.AfterFetch, BeforeParse: c.BeforeParse, AfterParse: c.AfterParse}
 	c.request.Init()
 
-    if c.OnError == nil {
-        c.OnError = func(r *Request, err error) {}
-    }
+	if c.OnError == nil {
+		c.OnError = func(r *Request, err error) {}
+	}
 
 	c.request.Properties["Delay"] = c.Delay
 	c.request.Properties["AllowedDomains"] = c.AllowedDomains
@@ -45,7 +47,8 @@ func (c *Crawler) Init() {
 	c.request.Properties["AllowedDepth"] = c.AllowedDepth
 	c.request.Properties["ContentLength"] = c.ContentLength
 	c.request.Headers["User-Agent"] = c.UserAgent
-    c.request.Properties["RobotsMap"] = &sync.Map{}
+	c.request.Properties["RobotsMap"] = &sync.Map{}
+    c.request.Properties["Client"] = c.Client
 
 	if c.Delay == 0 {
 		c.request.Properties["Delay"] = DefaultDelay
@@ -63,8 +66,13 @@ func (c *Crawler) Init() {
 		c.request.Properties["AllowedDepth"] = math.MaxInt
 	}
 	if c.ContentLength == 0 {
-		c.request.Properties["ContentLength"] = int64(4000000) 
+		c.request.Properties["ContentLength"] = int64(4000000)
 	}
+    if c.Client == nil {
+        client := http.DefaultClient
+        client.Timeout = 5 * time.Second
+        c.request.Properties["Client"] = client
+    }
 
 }
 
@@ -96,10 +104,10 @@ func (c *Crawler) Traverse() {
 
 		discovered, err := req.Do()
 
-        if err != nil {
-            c.OnError(req, err)
-            continue
-        }
+		if err != nil {
+			c.OnError(req, err)
+			continue
+		}
 
 		for _, discovery := range discovered {
 			c.queue.Push(discovery)

@@ -126,6 +126,7 @@ func (req Request) New(method string, uri string) (*Request, error) {
 }
 
 func (req *Request) FetchRobots() (*robotstxt.Group, error) {
+    client := req.Properties["Client"].(*http.Client)
     robotsMap := req.Properties["RobotsMap"].(*sync.Map)
     group, exists := robotsMap.Load(req.URL.Hostname())
     if !exists {
@@ -141,7 +142,7 @@ func (req *Request) FetchRobots() (*robotstxt.Group, error) {
             httpReq.Header.Set(h, val)
         }
 
-        httpRes, err := http.DefaultClient.Do(httpReq)
+        httpRes, err := client.Do(httpReq)
         if err != nil {
             return nil, err
         }
@@ -159,7 +160,8 @@ func (req *Request) FetchRobots() (*robotstxt.Group, error) {
 func (req *Request) Fetch() (*http.Response, error) {
 	req.BeforeFetch(req)
 	defer req.AfterFetch(req)
-
+    
+    client := req.Properties["Client"].(*http.Client)
 	httpReq, err := http.NewRequest(req.Method, req.URL.String(), nil)
 	if err != nil {
 		return nil, err
@@ -169,7 +171,7 @@ func (req *Request) Fetch() (*http.Response, error) {
 		httpReq.Header.Set(h, val)
 	}
 
-	httpRes, err := http.DefaultClient.Do(httpReq)
+	httpRes, err := client.Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
