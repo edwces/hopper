@@ -173,20 +173,18 @@ func (req *Request) Fetch() (*http.Response, error) {
 		return nil, err
 	}
 
-    // Naive checking for content length as some website don't return this header
-    // TODO: Implement MaxBytesReader on req.Body
-    if httpRes.ContentLength != -1 && httpRes.ContentLength < req.Properties["ContentLength"].(int64) {
-        return nil, errors.New("Exceeded maximum content length")
-    } 
-
-	return httpRes, nil
+    return httpRes, nil
 }
 
 func (req *Request) Parse(body io.Reader) (*html.Node, error) {
 	req.BeforeParse(req)
 	defer req.AfterParse(req)
 
-	return html.Parse(body)
+    // Naive checking for content length as some website don't return this header
+    // TODO: Implement MaxBytesReader on req.Body
+    reader := io.LimitReader(body, req.Properties["ContentLength"].(int64))
+
+	return html.Parse(reader)
 }
 
 func (req *Request) Discover(node *html.Node) []*Request {
