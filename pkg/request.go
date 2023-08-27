@@ -172,6 +172,9 @@ func (req *Request) Fetch() (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
+    if httpRes.StatusCode < 200 || httpRes.StatusCode >= 300 {
+        return nil, errors.New("Invalid status code: " + httpRes.Status)
+    }
 
     return httpRes, nil
 }
