@@ -46,7 +46,7 @@ func (c *Crawler) Init() {
 	c.request.Properties["DisallowedDomains"] = c.DisallowedDomains
 	c.request.Properties["AllowedDepth"] = c.AllowedDepth
 	c.request.Properties["ContentLength"] = c.ContentLength
-	c.request.Headers["User-Agent"] = c.UserAgent
+	c.request.Headers.Set("User-Agent", c.UserAgent)
 	c.request.Properties["RobotsMap"] = &sync.Map{}
     c.request.Properties["Client"] = c.Client
 
@@ -54,7 +54,7 @@ func (c *Crawler) Init() {
 		c.request.Properties["Delay"] = DefaultDelay
 	}
 	if c.UserAgent == "" {
-		c.request.Headers["User-Agent"] = DefaultUserAgent
+		c.request.Headers.Set("User-Agent", DefaultUserAgent)
 	}
 	if c.AllowedDomains == nil {
 		c.request.Properties["AllowedDomains"] = []string{}

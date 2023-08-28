@@ -25,7 +25,7 @@ type Request struct {
 
 	Response *http.Response
 
-	Headers    map[string]string
+	Headers    http.Header
 	Properties map[string]any
 
 	BeforeRequest func(*Request)
@@ -58,7 +58,7 @@ func (req *Request) Init() {
 	}
 
 	req.URL = &url.URL{}
-	req.Headers = map[string]string{}
+	req.Headers = http.Header{} 
 	req.Properties = map[string]any{}
 	req.Depth = -1
 }
@@ -125,32 +125,41 @@ func (req Request) New(method string, uri string) (*Request, error) {
 	return &req, nil
 }
 
+
+func (req *Request) NewHTTPRequest(method string, uri *url.URL) (*http.Request, error) {
+    httpReq, err := http.NewRequest(method, uri.String(), nil)
+    if err != nil {
+        return nil, err
+    }
+
+    httpReq.Header = req.Headers 
+
+    return httpReq, err
+}
+
+
 func (req *Request) FetchRobots() (*robotstxt.Group, error) {
     client := req.Properties["Client"].(*http.Client)
     robotsMap := req.Properties["RobotsMap"].(*sync.Map)
     group, exists := robotsMap.Load(req.URL.Hostname())
     if !exists {
-        robotsURL := *req.URL
-        robotsURL.JoinPath("robots.txt")
+        robotsURL := req.URL.JoinPath("robots.txt")
 
-        httpReq, err := http.NewRequest(req.Method, req.URL.String(), nil)
+        httpReq, err := req.NewHTTPRequest(http.MethodGet, robotsURL)
         if err != nil {
             return nil, err
-        }
-
-        for h, val := range req.Headers {
-            httpReq.Header.Set(h, val)
         }
 
         httpRes, err := client.Do(httpReq)
         if err != nil {
             return nil, err
         }
+
         robots, err := robotstxt.FromResponse(httpRes)
         if err != nil {
             return nil, err
         }
-        group := robots.FindGroup(req.Headers["User-Agent"])
+        group := robots.FindGroup(req.Headers.Get("User-Agent"))
         robotsMap.Store(req.URL.Hostname(), group)        
         return group, nil
     }
@@ -162,14 +171,7 @@ func (req *Request) Fetch() (*http.Response, error) {
 	defer req.AfterFetch(req)
     
     client := req.Properties["Client"].(*http.Client)
-	httpReq, err := http.NewRequest(req.Method, req.URL.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	for h, val := range req.Headers {
-		httpReq.Header.Set(h, val)
-	}
+	httpReq, err := req.NewHTTPRequest(req.Method, req.URL)
 
 	httpRes, err := client.Do(httpReq)
 	if err != nil {
