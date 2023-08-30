@@ -6,10 +6,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/temoto/robotstxt"
 	"golang.org/x/net/html"
 )
 
@@ -34,6 +32,8 @@ type Request struct {
 	AfterParse    func(*Request)
 	BeforeFetch   func(*Request)
 	AfterFetch    func(*Request)
+
+    fetcher *Fetcher
 }
 
 func (req *Request) Init() {
@@ -65,26 +65,32 @@ func (req *Request) Init() {
 
 func (req *Request) Do() ([]*Request, error) {
 	defer req.End()
-
-    group, err := req.FetchRobots()
+    
+	req.BeforeRequest(req)
+    
+    // Handle robots.txt
+    req.fetcher.SetDefaultHeaders(req)
+    group, err := req.fetcher.FetchRobots(req)
     if err != nil {
         return nil, err
     }
     if !group.Test(req.URL.Path) {
         return nil, errors.New("Robots.txt excluded path")
     }
-    // Set specific delay for this request
     if group.CrawlDelay != 0 {
         req.Properties["Delay"] = group.CrawlDelay
     }
-
-	req.BeforeRequest(req)
-
-    res, err := req.Fetch()
+    
+    // Handle fetching
+    req.BeforeFetch(req)
+    res, err := req.fetcher.FetchHTML(req)
     if err != nil {
         return nil, err
     }
     req.Response = res
+    req.AfterFetch(req)
+    
+    // Handle Parsing
     doc, err := req.Parse(res.Body)
     if err != nil {
         return nil, err
@@ -105,6 +111,7 @@ func (req Request) New(method string, uri string) (*Request, error) {
 
 	req.URL = parsed
 	req.Method = method
+    req.Headers = http.Header{}
 	req.Response = nil
 	req.Depth++
 
@@ -117,6 +124,7 @@ func (req Request) New(method string, uri string) (*Request, error) {
         newProperties[k] = v
     }
     newProperties["Delay"] = DefaultDelay
+    req.Properties = newProperties
 
 	if !req.Valid() {
 		return nil, errors.New("Invalid request")
@@ -125,64 +133,6 @@ func (req Request) New(method string, uri string) (*Request, error) {
 	return &req, nil
 }
 
-
-func (req *Request) NewHTTPRequest(method string, uri *url.URL) (*http.Request, error) {
-    httpReq, err := http.NewRequest(method, uri.String(), nil)
-    if err != nil {
-        return nil, err
-    }
-
-    httpReq.Header = req.Headers 
-
-    return httpReq, err
-}
-
-
-func (req *Request) FetchRobots() (*robotstxt.Group, error) {
-    client := req.Properties["Client"].(*http.Client)
-    robotsMap := req.Properties["RobotsMap"].(*sync.Map)
-    group, exists := robotsMap.Load(req.URL.Hostname())
-    if !exists {
-        robotsURL := req.URL.JoinPath("robots.txt")
-
-        httpReq, err := req.NewHTTPRequest(http.MethodGet, robotsURL)
-        if err != nil {
-            return nil, err
-        }
-
-        httpRes, err := client.Do(httpReq)
-        if err != nil {
-            return nil, err
-        }
-
-        robots, err := robotstxt.FromResponse(httpRes)
-        if err != nil {
-            return nil, err
-        }
-        group := robots.FindGroup(req.Headers.Get("User-Agent"))
-        robotsMap.Store(req.URL.Hostname(), group)        
-        return group, nil
-    }
-    return group.(*robotstxt.Group), nil
-}
-
-func (req *Request) Fetch() (*http.Response, error) {
-	req.BeforeFetch(req)
-	defer req.AfterFetch(req)
-    
-    client := req.Properties["Client"].(*http.Client)
-	httpReq, err := req.NewHTTPRequest(req.Method, req.URL)
-
-	httpRes, err := client.Do(httpReq)
-	if err != nil {
-		return nil, err
-	}
-    if httpRes.StatusCode < 200 || httpRes.StatusCode >= 300 {
-        return nil, errors.New("Invalid status code: " + httpRes.Status)
-    }
-
-    return httpRes, nil
-}
 
 func (req *Request) Parse(body io.Reader) (*html.Node, error) {
 	req.BeforeParse(req)

@@ -3,7 +3,6 @@ package hopper
 import (
 	"math"
 	"net/http"
-	"sync"
 	"time"
 )
 
@@ -19,6 +18,7 @@ type Crawler struct {
 
 	queue   *URLQueue
 	request *Request
+    fetcher *Fetcher
 
 	BeforeRequest func(*Request)
 	AfterRequest  func(*Request)
@@ -34,27 +34,23 @@ type Crawler struct {
 func (c *Crawler) Init() {
 	c.queue = &URLQueue{Max: c.Concurrency}
 	c.queue.Init()
-	c.request = &Request{BeforeRequest: c.BeforeRequest, AfterRequest: c.AfterRequest, BeforeFetch: c.BeforeFetch, AfterFetch: c.AfterFetch, BeforeParse: c.BeforeParse, AfterParse: c.AfterParse}
+	c.fetcher = &Fetcher{Client: c.Client, Delay: c.Delay}
+    c.fetcher.Init()
+    c.request = &Request{fetcher: c.fetcher, BeforeRequest: c.BeforeRequest, AfterRequest: c.AfterRequest, BeforeFetch: c.BeforeFetch, AfterFetch: c.AfterFetch, BeforeParse: c.BeforeParse, AfterParse: c.AfterParse}
 	c.request.Init()
+
 
 	if c.OnError == nil {
 		c.OnError = func(r *Request, err error) {}
 	}
 
-	c.request.Properties["Delay"] = c.Delay
 	c.request.Properties["AllowedDomains"] = c.AllowedDomains
 	c.request.Properties["DisallowedDomains"] = c.DisallowedDomains
 	c.request.Properties["AllowedDepth"] = c.AllowedDepth
-	c.request.Properties["ContentLength"] = c.ContentLength
-	c.request.Headers.Set("User-Agent", c.UserAgent)
-	c.request.Properties["RobotsMap"] = &sync.Map{}
-    c.request.Properties["Client"] = c.Client
+	c.fetcher.Headers["User-Agent"] = c.UserAgent
 
-	if c.Delay == 0 {
-		c.request.Properties["Delay"] = DefaultDelay
-	}
 	if c.UserAgent == "" {
-		c.request.Headers.Set("User-Agent", DefaultUserAgent)
+		c.fetcher.Headers["User-Agent"] = DefaultUserAgent
 	}
 	if c.AllowedDomains == nil {
 		c.request.Properties["AllowedDomains"] = []string{}
@@ -68,11 +64,6 @@ func (c *Crawler) Init() {
 	if c.ContentLength == 0 {
 		c.request.Properties["ContentLength"] = int64(4000000)
 	}
-    if c.Client == nil {
-        client := http.DefaultClient
-        client.Timeout = 5 * time.Second
-        c.request.Properties["Client"] = client
-    }
 
 }
 
