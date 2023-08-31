@@ -68,8 +68,9 @@ func (req *Request) Do() ([]*Request, error) {
     
 	req.BeforeRequest(req)
     
-    // Handle robots.txt
     req.fetcher.SetDefaultHeaders(req)
+
+    // Handle robots.txt
     group, err := req.fetcher.FetchRobots(req)
     if err != nil {
         return nil, err
@@ -77,13 +78,10 @@ func (req *Request) Do() ([]*Request, error) {
     if !group.Test(req.URL.Path) {
         return nil, errors.New("Robots.txt excluded path")
     }
-    if group.CrawlDelay != 0 {
-        req.Properties["Delay"] = group.CrawlDelay
-    }
     
     // Handle fetching
     req.BeforeFetch(req)
-    res, err := req.fetcher.FetchHTML(req)
+    res, err := req.fetcher.Fetch(req)
     if err != nil {
         return nil, err
     }
@@ -123,7 +121,7 @@ func (req Request) New(method string, uri string) (*Request, error) {
     for k, v := range req.Properties {
         newProperties[k] = v
     }
-    newProperties["Delay"] = DefaultDelay
+    newProperties["Delay"] = req.fetcher.GetDelay(req.URL) 
     req.Properties = newProperties
 
 	if !req.Valid() {
@@ -174,6 +172,10 @@ func (req *Request) Discover(node *html.Node) []*Request {
 }
 
 func (req *Request) Valid() bool {
+    if !req.fetcher.Crawlable(req.URL) {
+        return false
+    }
+
 	if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
 		return false
 	}

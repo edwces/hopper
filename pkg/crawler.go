@@ -18,7 +18,6 @@ type Crawler struct {
 
 	queue   *URLQueue
 	request *Request
-    fetcher *Fetcher
 
 	BeforeRequest func(*Request)
 	AfterRequest  func(*Request)
@@ -34,11 +33,17 @@ type Crawler struct {
 func (c *Crawler) Init() {
 	c.queue = &URLQueue{Max: c.Concurrency}
 	c.queue.Init()
-	c.fetcher = &Fetcher{Client: c.Client, Delay: c.Delay}
-    c.fetcher.Init()
-    c.request = &Request{fetcher: c.fetcher, BeforeRequest: c.BeforeRequest, AfterRequest: c.AfterRequest, BeforeFetch: c.BeforeFetch, AfterFetch: c.AfterFetch, BeforeParse: c.BeforeParse, AfterParse: c.AfterParse}
+    fetcher := &Fetcher{Client: c.Client, Delay: c.Delay}
+	fetcher.Init()
+	c.request = &Request{
+        fetcher: fetcher,
+        BeforeRequest: c.BeforeRequest,
+        AfterRequest: c.AfterRequest,
+        BeforeFetch: c.BeforeFetch,
+        AfterFetch: c.AfterFetch,
+        BeforeParse: c.BeforeParse,
+        AfterParse: c.AfterParse}
 	c.request.Init()
-
 
 	if c.OnError == nil {
 		c.OnError = func(r *Request, err error) {}
@@ -47,10 +52,10 @@ func (c *Crawler) Init() {
 	c.request.Properties["AllowedDomains"] = c.AllowedDomains
 	c.request.Properties["DisallowedDomains"] = c.DisallowedDomains
 	c.request.Properties["AllowedDepth"] = c.AllowedDepth
-	c.fetcher.Headers["User-Agent"] = c.UserAgent
+	fetcher.Headers["User-Agent"] = c.UserAgent
 
 	if c.UserAgent == "" {
-		c.fetcher.Headers["User-Agent"] = DefaultUserAgent
+		fetcher.Headers["User-Agent"] = DefaultUserAgent
 	}
 	if c.AllowedDomains == nil {
 		c.request.Properties["AllowedDomains"] = []string{}

@@ -3,6 +3,7 @@ package hopper
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -54,7 +55,7 @@ func (f *Fetcher) Do(r *Request) (*http.Response, error) {
     return f.Client.Do(req)
 }
 
-func (f *Fetcher) FetchHTML(r *Request) (*http.Response, error) {
+func (f *Fetcher) Fetch(r *Request) (*http.Response, error) {
 	res, err := f.Do(r)
 	if err != nil {
 		return nil, err
@@ -66,6 +67,8 @@ func (f *Fetcher) FetchHTML(r *Request) (*http.Response, error) {
 
     return res, err
 }
+
+
 
 func (f *Fetcher) FetchRobots(r *Request) (*robotstxt.Group, error) {
     group, exists := f.robots.Load(r.URL.Hostname())
@@ -91,3 +94,19 @@ func (f *Fetcher) FetchRobots(r *Request) (*robotstxt.Group, error) {
 
     return group.(*robotstxt.Group), nil
 }
+
+func (f *Fetcher) Crawlable(uri *url.URL) bool {
+    group, exists := f.robots.Load(uri.Hostname())
+    if exists && !group.(*robotstxt.Group).Test(uri.Path) {
+        return false
+    }
+    return true  
+}
+
+func (f *Fetcher) GetDelay(uri *url.URL) time.Duration {
+    group, exists := f.robots.Load(uri.Hostname())
+    if exists && group.(*robotstxt.Group).CrawlDelay != 0 {
+        return group.(*robotstxt.Group).CrawlDelay
+    }
+    return f.Delay
+} 
