@@ -24,15 +24,15 @@ func TestFetcherDelay(t *testing.T) {
         t.Fail()
     }
     
-    t.Run("group=nil", func(t *testing.T) {
-        delay := f.GetDelay(uri)
+    t.Run("WithoutGroup", func(t *testing.T) {
+        delay := f.GetDelay(uri, "")
 
         if delay != TestDelay {
             t.Fatalf("f.GetDelay = %s, want %s", delay, TestDelay)
         }
     })
 
-    t.Run("group.CrawlDelay=0", func(t *testing.T) {
+    t.Run("WithoutGroupDelay", func(t *testing.T) {
         robots, err := robotstxt.FromString(`
             User-agent: hopper/test
             Disallow: /w/
@@ -43,15 +43,15 @@ func TestFetcherDelay(t *testing.T) {
             t.Fail()
         }
 
-        f.SetRobots(uri.Hostname(), robots)
-        delay := f.GetDelay(uri)
+        f.SetGroup(uri.Hostname(), robots)
+        delay := f.GetDelay(uri, "")
 
         if delay != TestDelay {
             t.Fatalf("f.GetDelay = %s, want %s", delay, TestDelay)
         }
     })
 
-    t.Run("group.CrawlDelay!=0", func(t *testing.T) {
+    t.Run("WithGroupDelay", func(t *testing.T) {
         robots, err := robotstxt.FromString(`
             User-agent: hopper/test
             Crawl-Delay: 10
@@ -63,13 +63,37 @@ func TestFetcherDelay(t *testing.T) {
             t.Fail()
         }
 
-        f.SetRobots(uri.Hostname(), robots)
-        delay := f.GetDelay(uri)
+        f.SetGroup(uri.Hostname(), robots)
+        delay := f.GetDelay(uri, "")
 
         if delay != TestRobotsDelay {
             t.Fatalf("f.GetDelay = %s, want %s", delay, TestRobotsDelay)
         }
     })
+
+    t.Run("WithGroupDelayOnDifferentAgent", func(t *testing.T) {
+        robots, err := robotstxt.FromString(`
+            User-agent: hopper/different
+            Crawl-Delay: 10
+            Disallow: /i/
+
+            User-agent: hopper/test
+            Disallow: /w/
+
+            Sitemap: https://www.example.com/sitemap.xml
+        `)
+        if err != nil {
+            t.Fail()
+        }
+
+        f.SetGroup(uri.Hostname(), robots)
+        delay := f.GetDelay(uri, "hopper/different")
+
+        if delay != TestRobotsDelay {
+            t.Fatalf("f.GetDelay = %s, want %s", delay, TestRobotsDelay)
+        }
+    })
+
 }
 
 func TestFetcherCrawlable(t *testing.T) {
@@ -82,15 +106,15 @@ func TestFetcherCrawlable(t *testing.T) {
         t.Fail()
     }
 
-    t.Run("group=nil", func(t *testing.T) {
-        crawlable := f.Crawlable(uri)
+    t.Run("WithoutGroup", func(t *testing.T) {
+        crawlable := f.Crawlable(uri, "")
 
         if !crawlable {
             t.Fatalf("f.Crawlable = %t, want %t", crawlable, true)
         }
     })
 
-    t.Run("group.Disallow=nil", func(t *testing.T) {
+    t.Run("WithoutGroupPathDisallowed", func(t *testing.T) {
         robots, err := robotstxt.FromString(`
             User-agent: hopper/test
 
@@ -100,15 +124,15 @@ func TestFetcherCrawlable(t *testing.T) {
             t.Fail()
         }
         
-        f.SetRobots(uri.Hostname(), robots)
-        crawlable := f.Crawlable(uri)
+        f.SetGroup(uri.Hostname(), robots)
+        crawlable := f.Crawlable(uri, "")
 
         if !crawlable {
             t.Fatalf("f.Crawlable = %t, want %t", crawlable, true)
         }
     })
 
-    t.Run("group.Disallow=path", func(t *testing.T) {
+    t.Run("WithGroupPathDisallowed", func(t *testing.T) {
         robots, err := robotstxt.FromString(`
             User-agent: hopper/test
             Disallow: /category/
@@ -119,12 +143,33 @@ func TestFetcherCrawlable(t *testing.T) {
             t.Fail()
         }
         
-        f.SetRobots(uri.Hostname(), robots)
-        crawlable := f.Crawlable(uri)
+        f.SetGroup(uri.Hostname(), robots)
+        crawlable := f.Crawlable(uri, "")
 
         if crawlable {
             t.Fatalf("f.Crawlable = %t, want %t", crawlable, false)
         }
     })
 
+    t.Run("WithGroupPathDisallowedOnDifferentAgent", func(t *testing.T) {
+        robots, err := robotstxt.FromString(`
+            User-agent: hopper/test
+            Disallow: /category/
+
+            User-agent: hopper/test
+            Disallow: /w/
+
+            Sitemap: https://www.example.com/sitemap.xml
+        `)
+        if err != nil {
+            t.Fail()
+        }
+        
+        f.SetGroup(uri.Hostname(), robots)
+        crawlable := f.Crawlable(uri, "")
+
+        if crawlable {
+            t.Fatalf("f.Crawlable = %t, want %t", crawlable, false)
+        }
+    })
 }

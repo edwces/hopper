@@ -121,7 +121,7 @@ func (req Request) New(method string, uri string) (*Request, error) {
     for k, v := range req.Properties {
         newProperties[k] = v
     }
-    newProperties["Delay"] = req.fetcher.GetDelay(req.URL) 
+    newProperties["Delay"] = req.fetcher.GetDelay(req.URL, req.Headers.Get("User-Agent")) 
     req.Properties = newProperties
 
 	if !req.Valid() {
@@ -172,7 +172,7 @@ func (req *Request) Discover(node *html.Node) []*Request {
 }
 
 func (req *Request) Valid() bool {
-    if !req.fetcher.Crawlable(req.URL) {
+    if !req.fetcher.Crawlable(req.URL, req.Headers.Get("User-Agent")) {
         return false
     }
 

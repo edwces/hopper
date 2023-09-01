@@ -26,6 +26,7 @@ type Fetcher struct {
 	Headers map[string]string
 
 	robots sync.Map
+	groups sync.Map
 }
 
 func (f *Fetcher) Init() {
@@ -39,6 +40,7 @@ func (f *Fetcher) Init() {
 
 	f.Headers = map[string]string{}
 	f.robots = sync.Map{}
+	f.groups = sync.Map{}
 }
 
 func (f *Fetcher) Do(r *Request) (*http.Response, error) {
@@ -89,30 +91,49 @@ func (f *Fetcher) FetchRobots(r *Request) (*robotstxt.Group, error) {
 			return nil, err
 		}
 
-		f.SetRobots(req.URL.Hostname(), robots)
+		f.SetGroup(req.URL.Hostname(), robots)
 	}
-	group, _ := f.robots.Load(r.URL.Hostname())
+	group, _ := f.getGroup(r.URL.Hostname(), r.Headers.Get("User-Agent"))
 
-	return group.(*robotstxt.Group), nil
+	return group, nil
 }
 
-func (f *Fetcher) SetRobots(host string, robots *robotstxt.RobotsData) {
+func (f *Fetcher) SetGroup(host string, robots *robotstxt.RobotsData) {
 	group := robots.FindGroup(f.Headers["User-Agent"])
-	f.robots.Store(host, group)
+	f.groups.Store(host, group)
+	f.robots.Store(host, robots)
 }
 
-func (f *Fetcher) Crawlable(uri *url.URL) bool {
-	group, exists := f.robots.Load(uri.Hostname())
-	if !exists  {
+func (f *Fetcher) getGroup(host string, userAgent string) (*robotstxt.Group, bool) {
+	if userAgent == f.Headers["User-Agent"] || userAgent == "" {
+		group, exists := f.groups.Load(host)
+		if !exists {
+			return nil, exists
+		}
+		return group.(*robotstxt.Group), exists
+	}
+
+	robots, exists := f.robots.Load(host)
+	if !exists {
+		return nil, exists
+	}
+	return robots.(*robotstxt.RobotsData).FindGroup(userAgent), exists
+}
+
+func (f *Fetcher) Crawlable(uri *url.URL, userAgent string) bool {
+	group, exists := f.getGroup(uri.Hostname(), userAgent)
+	if !exists {
 		return true
 	}
-	return group.(*robotstxt.Group).Test(uri.Path)
+
+	return group.Test(uri.Path)
 }
 
-func (f *Fetcher) GetDelay(uri *url.URL) time.Duration {
-	group, exists := f.robots.Load(uri.Hostname())
-	if exists && group.(*robotstxt.Group).CrawlDelay != 0 {
-		return group.(*robotstxt.Group).CrawlDelay
+func (f *Fetcher) GetDelay(uri *url.URL, userAgent string) time.Duration {
+	group, exists := f.getGroup(uri.Hostname(), userAgent)
+	if exists && group.CrawlDelay != 0 {
+		return group.CrawlDelay
 	}
+
 	return f.Delay
 }
