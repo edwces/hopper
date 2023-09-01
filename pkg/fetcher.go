@@ -103,10 +103,10 @@ func (f *Fetcher) SetRobots(host string, robots *robotstxt.RobotsData) {
 
 func (f *Fetcher) Crawlable(uri *url.URL) bool {
 	group, exists := f.robots.Load(uri.Hostname())
-	if exists && !group.(*robotstxt.Group).Test(uri.Path) {
-		return false
+	if !exists  {
+		return true
 	}
-	return true
+	return group.(*robotstxt.Group).Test(uri.Path)
 }
 
 func (f *Fetcher) GetDelay(uri *url.URL) time.Duration {
