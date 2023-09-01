@@ -36,18 +36,16 @@ func (f *Fetcher) Init() {
     f.robots = sync.Map{}
 }
 
-func (f *Fetcher) SetDefaultHeaders(r *Request) {
-    for k, v := range f.Headers {
-        if r.Headers.Get(k) != "" {
-            r.Headers.Set(k, v)
-        }
-    }
-}
-
 func (f *Fetcher) Do(r *Request) (*http.Response, error) {
     req, err := http.NewRequest(r.Method, r.URL.String(), nil)
     if err != nil {
         return nil, err
+    }
+
+    for k, v := range f.Headers {
+        if r.Headers.Get(k) != "" {
+            r.Headers.Set(k, v)
+        }
     }
 
     req.Header = r.Headers

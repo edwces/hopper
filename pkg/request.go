@@ -68,8 +68,6 @@ func (req *Request) Do() ([]*Request, error) {
     
 	req.BeforeRequest(req)
     
-    req.fetcher.SetDefaultHeaders(req)
-
     // Handle robots.txt
     group, err := req.fetcher.FetchRobots(req)
     if err != nil {
@@ -93,6 +91,8 @@ func (req *Request) Do() ([]*Request, error) {
     if err != nil {
         return nil, err
     }
+
+    // Handle Discovery
 	return req.Discover(doc), nil
 } 
 
