@@ -17,7 +17,7 @@ const (
 func TestFetcherDelay(t *testing.T) {
     f := Fetcher{Delay: TestDelay}
     f.Init()
-    f.Headers["User-Agent"] = TestUserAgent
+    f.Headers.Set("User-Agent", TestUserAgent)
 
     uri, err := url.Parse("http://mock.com/hello")
     if err != nil {
@@ -99,7 +99,7 @@ func TestFetcherDelay(t *testing.T) {
 func TestFetcherCrawlable(t *testing.T) {
     f := Fetcher{}
     f.Init()
-    f.Headers["User-Agent"] = TestUserAgent
+    f.Headers.Set("User-Agent", TestUserAgent)
 
     uri, err := url.Parse("http://mock.com/category/resource")
     if err != nil {
@@ -173,3 +173,4 @@ func TestFetcherCrawlable(t *testing.T) {
         }
     })
 }
+

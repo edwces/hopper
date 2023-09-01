@@ -52,10 +52,10 @@ func (c *Crawler) Init() {
 	c.request.Properties["AllowedDomains"] = c.AllowedDomains
 	c.request.Properties["DisallowedDomains"] = c.DisallowedDomains
 	c.request.Properties["AllowedDepth"] = c.AllowedDepth
-	fetcher.Headers["User-Agent"] = c.UserAgent
+	fetcher.Headers.Set("User-Agent", c.UserAgent)
 
 	if c.UserAgent == "" {
-		fetcher.Headers["User-Agent"] = DefaultUserAgent
+	    fetcher.Headers.Set("User-Agent", DefaultUserAgent)
 	}
 	if c.AllowedDomains == nil {
 		c.request.Properties["AllowedDomains"] = []string{}

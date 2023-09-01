@@ -15,15 +15,10 @@ const (
 	DefaultFetcherDelay   = 15 * time.Second
 )
 
-// Add Some option to robots option so for persistentUserAgent so our Queries can be optimized
-// by having two fields for robots and groups for default user-agent
-// BUG: For example for now when user will set different User-agent for request robots txt
-// group will be saved and used only for that user-agent
-
 type Fetcher struct {
 	Client  *http.Client
 	Delay   time.Duration
-	Headers map[string]string
+	Headers http.Header 
 
 	robots sync.Map
 	groups sync.Map
@@ -38,7 +33,7 @@ func (f *Fetcher) Init() {
 		f.Delay = DefaultFetcherDelay
 	}
 
-	f.Headers = map[string]string{}
+	f.Headers = http.Header{} 
 	f.robots = sync.Map{}
 	f.groups = sync.Map{}
 }
@@ -51,7 +46,7 @@ func (f *Fetcher) Do(r *Request) (*http.Response, error) {
 
 	for k, v := range f.Headers {
 		if r.Headers.Get(k) != "" {
-			r.Headers.Set(k, v)
+			r.Headers[k] = v
 		}
 	}
 
@@ -99,13 +94,13 @@ func (f *Fetcher) FetchRobots(r *Request) (*robotstxt.Group, error) {
 }
 
 func (f *Fetcher) SetGroup(host string, robots *robotstxt.RobotsData) {
-	group := robots.FindGroup(f.Headers["User-Agent"])
+	group := robots.FindGroup(f.Headers.Get("User-Agent"))
 	f.groups.Store(host, group)
 	f.robots.Store(host, robots)
 }
 
 func (f *Fetcher) getGroup(host string, userAgent string) (*robotstxt.Group, bool) {
-	if userAgent == f.Headers["User-Agent"] || userAgent == "" {
+	if userAgent == f.Headers.Get("User-Agent") || userAgent == "" {
 		group, exists := f.groups.Load(host)
 		if !exists {
 			return nil, exists
