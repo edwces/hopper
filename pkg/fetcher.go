@@ -18,7 +18,7 @@ const (
 type Fetcher struct {
 	Client  *http.Client
 	Delay   time.Duration
-	Headers http.Header 
+	Headers http.Header
 
 	robots sync.Map
 	groups sync.Map
@@ -33,9 +33,17 @@ func (f *Fetcher) Init() {
 		f.Delay = DefaultFetcherDelay
 	}
 
-	f.Headers = http.Header{} 
+	f.Headers = http.Header{}
 	f.robots = sync.Map{}
 	f.groups = sync.Map{}
+}
+
+func (f *Fetcher) Valid(res *http.Response) error {
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return errors.New("Invalid status code: " + res.Status)
+	}
+
+	return nil
 }
 
 func (f *Fetcher) Do(r *Request) (*http.Response, error) {
@@ -44,7 +52,7 @@ func (f *Fetcher) Do(r *Request) (*http.Response, error) {
 		return nil, err
 	}
 
-	for k, v := range f.Headers {
+    for k, v := range f.Headers {
 		if r.Headers.Get(k) != "" {
 			r.Headers[k] = v
 		}
@@ -55,42 +63,25 @@ func (f *Fetcher) Do(r *Request) (*http.Response, error) {
 	return f.Client.Do(req)
 }
 
-func (f *Fetcher) Fetch(r *Request) (*http.Response, error) {
-	res, err := f.Do(r)
+func (f *Fetcher) FetchRobots(host string) (*robotstxt.RobotsData, error) {
+	uri := url.URL{Scheme: "https", Host: host, Path: "robots.txt"}
+
+	req, err := http.NewRequest(http.MethodGet, uri.String(), nil)
 	if err != nil {
 		return nil, err
 	}
 
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return nil, errors.New("Invalid status code: " + res.Status)
+	res, err := f.Client.Do(req)
+	if err != nil {
+		return nil, err
 	}
 
-	return res, err
-}
-
-func (f *Fetcher) FetchRobots(r *Request) (*robotstxt.Group, error) {
-	_, exists := f.robots.Load(r.URL.Hostname())
-	if !exists {
-		req, err := r.New(http.MethodGet, "/robots.txt")
-		if err != nil {
-			return nil, err
-		}
-
-		res, err := f.Do(req)
-		if err != nil {
-			return nil, err
-		}
-
-		robots, err := robotstxt.FromResponse(res)
-		if err != nil {
-			return nil, err
-		}
-
-		f.SetGroup(req.URL.Hostname(), robots)
+	robots, err := robotstxt.FromResponse(res)
+	if err != nil {
+		return nil, err
 	}
-	group, _ := f.getGroup(r.URL.Hostname(), r.Headers.Get("User-Agent"))
 
-	return group, nil
+	return robots, err
 }
 
 func (f *Fetcher) SetGroup(host string, robots *robotstxt.RobotsData) {
@@ -99,7 +90,7 @@ func (f *Fetcher) SetGroup(host string, robots *robotstxt.RobotsData) {
 	f.robots.Store(host, robots)
 }
 
-func (f *Fetcher) getGroup(host string, userAgent string) (*robotstxt.Group, bool) {
+func (f *Fetcher) GetGroup(host string, userAgent string) (*robotstxt.Group, bool) {
 	if userAgent == f.Headers.Get("User-Agent") || userAgent == "" {
 		group, exists := f.groups.Load(host)
 		if !exists {
@@ -116,7 +107,7 @@ func (f *Fetcher) getGroup(host string, userAgent string) (*robotstxt.Group, boo
 }
 
 func (f *Fetcher) Crawlable(uri *url.URL, userAgent string) bool {
-	group, exists := f.getGroup(uri.Hostname(), userAgent)
+	group, exists := f.GetGroup(uri.Hostname(), userAgent)
 	if !exists {
 		return true
 	}
@@ -125,7 +116,7 @@ func (f *Fetcher) Crawlable(uri *url.URL, userAgent string) bool {
 }
 
 func (f *Fetcher) GetDelay(uri *url.URL, userAgent string) time.Duration {
-	group, exists := f.getGroup(uri.Hostname(), userAgent)
+	group, exists := f.GetGroup(uri.Hostname(), userAgent)
 	if exists && group.CrawlDelay != 0 {
 		return group.CrawlDelay
 	}

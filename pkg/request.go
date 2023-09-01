@@ -67,19 +67,28 @@ func (req *Request) Do() ([]*Request, error) {
 	defer req.End()
     
 	req.BeforeRequest(req)
-    
+
     // Handle robots.txt
-    group, err := req.fetcher.FetchRobots(req)
-    if err != nil {
-        return nil, err
+    _, exists := req.fetcher.GetGroup(req.URL.Hostname(), req.Headers.Get("User-Agent"))
+    if !exists {
+        robots, err := req.fetcher.FetchRobots(req.URL.Hostname())
+        if err != nil {
+            return []*Request{}, err
+        }
+        req.fetcher.SetGroup(req.URL.Hostname(), robots)
     }
-    if !group.Test(req.URL.Path) {
+
+    if !req.fetcher.Crawlable(req.URL, req.Headers.Get("User-Agent")) {
         return nil, errors.New("Robots.txt excluded path")
     }
     
     // Handle fetching
     req.BeforeFetch(req)
-    res, err := req.fetcher.Fetch(req)
+    res, err := req.fetcher.Do(req)
+    if err != nil {
+        return nil, err
+    }
+    err = req.fetcher.Valid(res)
     if err != nil {
         return nil, err
     }
