@@ -1,6 +1,7 @@
 package hopper
 
 import (
+	"fmt"
 	"math"
 	"net/http"
 	"time"
@@ -19,13 +20,9 @@ type Crawler struct {
 	queue   *URLQueue
 	request *Request
 
-	BeforeRequest func(*Request)
-	AfterRequest  func(*Request)
-	BeforeParse   func(*Request)
-	AfterParse    func(*Request)
-	BeforeFetch   func(*Request)
-	AfterFetch    func(*Request)
-
+	OnRequest func(*Request)
+	OnPush   func(*Request)
+	OnResponse   func(*Response)
 	OnError func(*Request, error)
 }
 
@@ -33,16 +30,9 @@ type Crawler struct {
 func (c *Crawler) Init() {
 	c.queue = &URLQueue{Max: c.Concurrency}
 	c.queue.Init()
-    fetcher := &Fetcher{Client: c.Client, Delay: c.Delay}
+	fetcher := &Fetcher{Client: c.Client, Delay: c.Delay}
 	fetcher.Init()
-	c.request = &Request{
-        fetcher: fetcher,
-        BeforeRequest: c.BeforeRequest,
-        AfterRequest: c.AfterRequest,
-        BeforeFetch: c.BeforeFetch,
-        AfterFetch: c.AfterFetch,
-        BeforeParse: c.BeforeParse,
-        AfterParse: c.AfterParse}
+	c.request = &Request{fetcher: fetcher}
 	c.request.Init()
 
 	if c.OnError == nil {
@@ -55,7 +45,7 @@ func (c *Crawler) Init() {
 	fetcher.Headers.Set("User-Agent", c.UserAgent)
 
 	if c.UserAgent == "" {
-	    fetcher.Headers.Set("User-Agent", DefaultUserAgent)
+		fetcher.Headers.Set("User-Agent", DefaultUserAgent)
 	}
 	if c.AllowedDomains == nil {
 		c.request.Properties["AllowedDomains"] = []string{}
@@ -70,6 +60,15 @@ func (c *Crawler) Init() {
 		c.request.Properties["ContentLength"] = int64(4000000)
 	}
 
+	if c.OnResponse == nil {
+		c.OnResponse = func(r *Response) {}
+	}
+	if c.OnRequest == nil {
+		c.OnRequest = func(r *Request) {}
+	}
+	if c.OnPush == nil {
+		c.OnPush = func(r *Request) {}
+	}
 }
 
 // Run is responsible for creating crawler workers.
@@ -98,15 +97,35 @@ func (c *Crawler) Traverse() {
 	for c.queue.Len() != 0 {
 		req := c.queue.Pop()
 
-		discovered, err := req.Do()
-
+		err := c.Visit(req)
 		if err != nil {
 			c.OnError(req, err)
-			continue
-		}
-
-		for _, discovery := range discovered {
-			c.queue.Push(discovery)
 		}
 	}
+}
+
+func (c *Crawler) Visit(req *Request) error {
+    c.OnRequest(req)
+	httpRes, err := req.Do()
+	if err != nil {
+		return fmt.Errorf("Request: %w", err)
+	}
+    
+	res, err := NewResponse(httpRes, req.Properties, req)
+	if err != nil {
+		return fmt.Errorf("Response: %w", err)
+	}
+    
+    c.OnResponse(res)
+	discovered, err := res.Do()
+	if err != nil {
+		return fmt.Errorf("Response: %w", err)
+	}
+
+	for _, discovery := range discovered {
+        c.OnPush(discovery)
+		c.queue.Push(discovery)
+	}
+
+	return nil
 }

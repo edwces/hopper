@@ -1,7 +1,6 @@
 package hopper
 
 import (
-	"net/http"
 	"net/url"
 	"testing"
 	"time"
@@ -171,27 +170,6 @@ func TestFetcherCrawlable(t *testing.T) {
 
         if crawlable {
             t.Fatalf("f.Crawlable = %t, want %t", crawlable, false)
-        }
-    })
-}
-
-func TestFetcherValid(t *testing.T) {
-    f := Fetcher{}
-    f.Init()
-
-    t.Run("WithInvalidResponse", func(t *testing.T) {
-        res := &http.Response{StatusCode: http.StatusContinue}
-        err := f.Valid(res)
-
-        if err == nil {
-            t.Fatalf("f.Valid == nil, want error")
-        }
-
-        res = &http.Response{StatusCode: http.StatusForbidden}
-        err = f.Valid(res)
-
-        if err == nil {
-            t.Fatalf("f.Valid == nil, want error")
         }
     })
 }

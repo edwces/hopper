@@ -1,7 +1,6 @@
 package hopper
 
 import (
-	"errors"
 	"net/http"
 	"net/url"
 	"sync"
@@ -36,14 +35,6 @@ func (f *Fetcher) Init() {
 	f.Headers = http.Header{}
 	f.robots = sync.Map{}
 	f.groups = sync.Map{}
-}
-
-func (f *Fetcher) Valid(res *http.Response) error {
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return errors.New("Invalid status code: " + res.Status)
-	}
-
-	return nil
 }
 
 func (f *Fetcher) Do(r *Request) (*http.Response, error) {
