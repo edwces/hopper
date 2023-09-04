@@ -7,6 +7,13 @@ import (
 	"time"
 )
 
+type (
+	RequestHandler  = func(*Request) error
+	ResponseHandler = func(*Response) error
+	PushHandler     = func(*Request) error
+	ErrorHandler    = func(*Request, error)
+)
+
 type Crawler struct {
 	Concurrency       int
 	Delay             time.Duration
@@ -20,29 +27,26 @@ type Crawler struct {
 	queue   *URLQueue
 	request *Request
 
-	OnRequest func(*Request)
-	OnPush   func(*Request)
-	OnResponse   func(*Response)
-	OnError func(*Request, error)
+	onRequest  []RequestHandler
+	onPush     []PushHandler
+	onResponse []ResponseHandler
+	onError    []ErrorHandler
 }
 
 // Init initializes default values for crawler.
 func (c *Crawler) Init() {
 	c.queue = &URLQueue{Max: c.Concurrency}
 	c.queue.Init()
+
 	fetcher := &Fetcher{Client: c.Client, Delay: c.Delay}
 	fetcher.Init()
+	fetcher.Headers.Set("User-Agent", c.UserAgent)
+
 	c.request = &Request{fetcher: fetcher}
 	c.request.Init()
-
-	if c.OnError == nil {
-		c.OnError = func(r *Request, err error) {}
-	}
-
 	c.request.Properties["AllowedDomains"] = c.AllowedDomains
 	c.request.Properties["DisallowedDomains"] = c.DisallowedDomains
 	c.request.Properties["AllowedDepth"] = c.AllowedDepth
-	fetcher.Headers.Set("User-Agent", c.UserAgent)
 
 	if c.UserAgent == "" {
 		fetcher.Headers.Set("User-Agent", DefaultUserAgent)
@@ -60,15 +64,26 @@ func (c *Crawler) Init() {
 		c.request.Properties["ContentLength"] = int64(4000000)
 	}
 
-	if c.OnResponse == nil {
-		c.OnResponse = func(r *Response) {}
-	}
-	if c.OnRequest == nil {
-		c.OnRequest = func(r *Request) {}
-	}
-	if c.OnPush == nil {
-		c.OnPush = func(r *Request) {}
-	}
+	c.onRequest = []RequestHandler{}
+	c.onResponse = []ResponseHandler{}
+	c.onPush = []PushHandler{}
+	c.onError = []ErrorHandler{}
+}
+
+func (c *Crawler) OnRequest(fn RequestHandler) {
+	c.onRequest = append([]RequestHandler{fn}, c.onRequest...)
+}
+
+func (c *Crawler) OnResponse(fn ResponseHandler) {
+	c.onResponse = append([]ResponseHandler{fn}, c.onResponse...)
+}
+
+func (c *Crawler) OnPush(fn PushHandler) {
+	c.onPush = append([]PushHandler{fn}, c.onPush...)
+}
+
+func (c *Crawler) OnError(fn ErrorHandler) {
+	c.onError = append([]ErrorHandler{fn}, c.onError...)
 }
 
 // Run is responsible for creating crawler workers.
@@ -99,31 +114,53 @@ func (c *Crawler) Traverse() {
 
 		err := c.Visit(req)
 		if err != nil {
-			c.OnError(req, err)
+			for _, fn := range c.onError {
+				fn(req, err)
+			}
 		}
 	}
 }
 
 func (c *Crawler) Visit(req *Request) error {
-    c.OnRequest(req)
+	for _, fn := range c.onRequest {
+		err := fn(req)
+		if err != nil {
+			return fmt.Errorf("Request: %w", err)
+
+		}
+	}
+
 	httpRes, err := req.Do()
 	if err != nil {
 		return fmt.Errorf("Request: %w", err)
 	}
-    
+
 	res, err := NewResponse(httpRes, req.Properties, req)
 	if err != nil {
 		return fmt.Errorf("Response: %w", err)
 	}
-    
-    c.OnResponse(res)
+
+	for _, fn := range c.onResponse {
+		err := fn(res)
+		if err != nil {
+			return fmt.Errorf("Response: %w", err)
+
+		}
+	}
+
 	discovered, err := res.Do()
 	if err != nil {
 		return fmt.Errorf("Response: %w", err)
 	}
 
 	for _, discovery := range discovered {
-        c.OnPush(discovery)
+		for _, fn := range c.onPush {
+			err := fn(discovery)
+			if err != nil {
+				return fmt.Errorf("Push: %w", err)
+			}
+		}
+
 		c.queue.Push(discovery)
 	}
 
