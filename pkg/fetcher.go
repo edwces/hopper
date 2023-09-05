@@ -1,6 +1,7 @@
 package hopper
 
 import (
+	"io"
 	"net/http"
 	"net/url"
 	"sync"
@@ -37,19 +38,19 @@ func (f *Fetcher) Init() {
 	f.groups = sync.Map{}
 }
 
-func (f *Fetcher) Do(r *Request) (*http.Response, error) {
-	req, err := http.NewRequest(r.Method, r.URL.String(), nil)
+func (f *Fetcher) Do(method string, uri *url.URL, body io.Reader, headers http.Header) (*http.Response, error) {
+	req, err := http.NewRequest(method, uri.String(), body)
 	if err != nil {
 		return nil, err
 	}
 
     for k, v := range f.Headers {
-		if r.Headers.Get(k) != "" {
-			r.Headers[k] = v
+		if headers.Get(k) == "" {
+			headers[k] = v
 		}
 	}
 
-	req.Header = r.Headers
+	req.Header = headers
 
 	return f.Client.Do(req)
 }

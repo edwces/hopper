@@ -46,7 +46,7 @@ func (req *Request) Do() (*http.Response, error) {
     }
     
     // Handle fetching
-    res, err := req.fetcher.Do(req)
+    res, err := req.fetcher.Do(req.Method, req.URL, nil, req.Headers)
     if err != nil {
         return nil, err
     }
