@@ -65,8 +65,8 @@ func (h *DelayedQueue) Pop() *Request {
 
 	req := h.queue[len(h.queue)-1]
 	h.queue = h.queue[:len(h.queue)-1]
-
-	time.Sleep(time.Until(h.clock.Add(req.Properties["Delay"].(time.Duration))))
+    
+    time.Sleep(time.Until(h.clock.Add(req.Properties["Delay"].(time.Duration))))
 	h.clock = time.Now()
 
 	return req

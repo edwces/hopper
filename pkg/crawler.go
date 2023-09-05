@@ -38,7 +38,7 @@ func (c *Crawler) Init() {
 	c.queue = &URLQueue{Max: c.Concurrency}
 	c.queue.Init()
 
-	fetcher := &Fetcher{Client: c.Client, Delay: c.Delay}
+	fetcher := &Fetcher{Client: c.Client}
 	fetcher.Init()
 	fetcher.Headers.Set("User-Agent", c.UserAgent)
 
@@ -63,6 +63,9 @@ func (c *Crawler) Init() {
 	if c.ContentLength == 0 {
 		c.request.Properties["ContentLength"] = int64(4000000)
 	}
+    if int(c.Delay) == 0 {
+        c.Delay = DefaultDelay
+    }
 
 	c.onRequest = []RequestHandler{}
 	c.onResponse = []ResponseHandler{}
@@ -154,15 +157,31 @@ func (c *Crawler) Visit(req *Request) error {
 	}
 
 	for _, discovery := range discovered {
-		for _, fn := range c.onPush {
-			err := fn(discovery)
-			if err != nil {
-				return fmt.Errorf("Push: %w", err)
-			}
-		}
-
-		c.queue.Push(discovery)
+        err := c.Push(discovery)
+        if err != nil {
+            for _, fn := range c.onError {
+                fn(discovery, err)
+            }
+        }
 	}
 
 	return nil
+}
+
+func (c *Crawler) Push(req *Request) error {
+    for _, fn := range c.onPush {
+        err := fn(req)
+        if err != nil {
+            return fmt.Errorf("Push: %w", err)
+        }
+	}
+    
+    // Temp fix for default delay for queue
+    delay, exist := req.Properties["Delay"]
+    if !exist || int(delay.(time.Duration)) == 0 {
+        req.Properties["Delay"] = c.Delay 
+    }
+
+    c.queue.Push(req)
+    return nil
 }

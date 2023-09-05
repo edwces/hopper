@@ -31,27 +31,7 @@ func (req *Request) Init() {
 }
 
 func (req *Request) Do() (*http.Response, error) {
-    // Handle robots.txt
-    _, exists := req.fetcher.GetGroup(req.URL.Hostname(), req.Headers.Get("User-Agent"))
-    if !exists {
-        robots, err := req.fetcher.FetchRobots(req.URL.Hostname())
-        if err != nil {
-            return nil, err
-        }
-        req.fetcher.SetGroup(req.URL.Hostname(), robots)
-    }
-
-    if !req.fetcher.Crawlable(req.URL, req.Headers.Get("User-Agent")) {
-        return nil, errors.New("Robots.txt excluded path")
-    }
-    
-    // Handle fetching
-    res, err := req.fetcher.Do(req.Method, req.URL, nil, req.Headers)
-    if err != nil {
-        return nil, err
-    }
-    
-    return res, nil
+    return req.fetcher.Do(req.Method, req.URL, nil, req.Headers) 
 }
 
 func (req Request) New(method string, uri string) (*Request, error) {
@@ -75,7 +55,6 @@ func (req Request) New(method string, uri string) (*Request, error) {
     for k, v := range req.Properties {
         newProperties[k] = v
     }
-    newProperties["Delay"] = req.fetcher.GetDelay(req.URL, req.Headers.Get("User-Agent")) 
     req.Properties = newProperties
 
 	if !req.Valid() {
@@ -86,11 +65,7 @@ func (req Request) New(method string, uri string) (*Request, error) {
 }
 
 func (req *Request) Valid() bool {
-    if !req.fetcher.Crawlable(req.URL, req.Headers.Get("User-Agent")) {
-        return false
-    }
-
-	if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+   	if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
 		return false
 	}
 
