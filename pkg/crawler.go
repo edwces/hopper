@@ -100,7 +100,7 @@ func (c *Crawler) Run(seeds ...string) {
 		if err != nil {
 			continue
 		}
-		go c.queue.Push(req)
+		go c.Push(req)
 	}
 
 	for free := range c.queue.Free {
