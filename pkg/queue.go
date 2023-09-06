@@ -130,10 +130,6 @@ func (u *URLQueue) Pop() *Request {
 	u.Lock()
 	defer u.Unlock()
 
-	if u.threads == 0 {
-		close(u.Free)
-	}
-
 	item := u.queue.Peek().(*PQueueItem)
 	req := item.value.(*DelayedQueue).Pop()
 
@@ -173,3 +169,11 @@ func (u *URLQueue) Len() int {
 
 	return u.queue.Len()
 }
+
+func (u *URLQueue) Threads() int {
+	u.Lock()
+	defer u.Unlock()
+
+	return u.threads
+}
+

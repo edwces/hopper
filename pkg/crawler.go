@@ -113,7 +113,7 @@ func (c *Crawler) Run(seeds ...string) {
 
 // Traverse starts crawl proccess until all links have been crawled.
 func (c *Crawler) Traverse() {
-	for c.queue.Len() != 0 {
+	for c.queue.Len() > 0 {
 		req := c.queue.Pop()
 
 		err := c.Visit(req)
@@ -121,8 +121,12 @@ func (c *Crawler) Traverse() {
 			for _, fn := range c.onError {
 				fn(req, err)
 			}
-		}
+		}    
 	}
+    
+    if c.queue.Len() <= 0 && c.queue.Threads() == 0 {
+        close(c.queue.Free)
+    }
 }
 
 func (c *Crawler) Visit(req *Request) error {
