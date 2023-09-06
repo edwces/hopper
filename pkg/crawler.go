@@ -25,6 +25,7 @@ type Crawler struct {
 	Client            *http.Client
 
 	queue   *URLQueue
+    client  *Client
 	request *Request
 
 	onRequest  []RequestHandler
@@ -38,18 +39,18 @@ func (c *Crawler) Init() {
 	c.queue = &URLQueue{Max: c.Concurrency}
 	c.queue.Init()
 
-	fetcher := &Fetcher{Client: c.Client}
-	fetcher.Init()
-	fetcher.Headers.Set("User-Agent", c.UserAgent)
+	c.client = &Client{Client: c.Client}
+	c.client.Init()
+	c.client.Headers.Set("User-Agent", c.UserAgent)
 
-	c.request = &Request{fetcher: fetcher}
+	c.request = &Request{}
 	c.request.Init()
 	c.request.Properties["AllowedDomains"] = c.AllowedDomains
 	c.request.Properties["DisallowedDomains"] = c.DisallowedDomains
 	c.request.Properties["AllowedDepth"] = c.AllowedDepth
 
 	if c.UserAgent == "" {
-		fetcher.Headers.Set("User-Agent", DefaultUserAgent)
+		c.client.Headers.Set("User-Agent", DefaultUserAgent)
 	}
 	if c.AllowedDomains == nil {
 		c.request.Properties["AllowedDomains"] = []string{}
@@ -133,7 +134,7 @@ func (c *Crawler) Visit(req *Request) error {
 		}
 	}
 
-	httpRes, err := req.Do()
+	httpRes, err := c.client.Do(req.Method, req.URL, nil, req.Headers)
 	if err != nil {
 		return fmt.Errorf("Request: %w", err)
 	}

@@ -2,6 +2,7 @@ package hopper
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"sync"
@@ -10,28 +11,30 @@ import (
 	"github.com/temoto/robotstxt"
 )
 
+var ErrRobotsTxtExcluded = errors.New("Excluded path")
+
 type RobotsTxtMiddleware struct {
-    Client *Fetcher
+    Client *Client
 
     groups sync.Map
     robots sync.Map
 }
 
 func RobotsTxt(crawler *Crawler) {
-    rt := &RobotsTxtMiddleware{Client: crawler.request.fetcher}
+    rt := &RobotsTxtMiddleware{Client: crawler.client}
 
     crawler.OnRequest(func(r *Request) error {
         _, exists := rt.GetGroup(r.URL.Hostname(), r.Headers.Get("User-Agent"))
         if !exists {
             robots, err := rt.Fetch(r.URL.Hostname())
             if err != nil {
-                return err
+                return fmt.Errorf("Robots: %w", err)
             }
             rt.SetGroup(r.URL.Hostname(), robots)
         }
 
         if !rt.Crawlable(r.URL, r.Headers.Get("User-Agent")) {
-            return errors.New("Robots.txt excluded path")
+            return fmt.Errorf("Robots: %w", ErrRobotsTxtExcluded)
         }
 
         return nil
@@ -39,7 +42,7 @@ func RobotsTxt(crawler *Crawler) {
 
     crawler.OnPush(func(r *Request) error {
         if !rt.Crawlable(r.URL, r.Headers.Get("User-Agent")) {
-            return errors.New("Robots.txt excluded path")
+            return fmt.Errorf("Robots: %w", ErrRobotsTxtExcluded)
         }
 
         r.Properties["Delay"] = rt.GetDelay(r.URL, r.Headers.Get("User-Agent"))

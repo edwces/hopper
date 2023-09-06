@@ -19,8 +19,6 @@ type Request struct {
 
 	Headers    http.Header
 	Properties map[string]any
-
-    fetcher *Fetcher
 }
 
 func (req *Request) Init() {
@@ -28,10 +26,6 @@ func (req *Request) Init() {
 	req.Headers = http.Header{} 
 	req.Properties = map[string]any{}
 	req.Depth = -1
-}
-
-func (req *Request) Do() (*http.Response, error) {
-    return req.fetcher.Do(req.Method, req.URL, nil, req.Headers) 
 }
 
 func (req Request) New(method string, uri string) (*Request, error) {
