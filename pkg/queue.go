@@ -86,7 +86,8 @@ type URLQueue struct {
 
 	Free chan int
 	Max  int
-
+    
+    running bool
 	threads int
 	queue   *PQueue
 	itemMap map[string]*PQueueItem
@@ -101,6 +102,7 @@ func (u *URLQueue) Init() {
 	u.itemMap = map[string]*PQueueItem{}
 	u.seen = map[string]bool{}
 	u.Free = make(chan int)
+    u.running = true
 
 	heap.Init(u.queue)
 }
@@ -175,5 +177,15 @@ func (u *URLQueue) Threads() int {
 	defer u.Unlock()
 
 	return u.threads
+}
+
+func (u *URLQueue) Close() {
+    u.Lock()
+    defer u.Unlock()
+
+    if u.running {
+        close(u.Free)
+        u.running = false
+    }
 }
 

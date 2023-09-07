@@ -109,6 +109,7 @@ func (c *Crawler) Run(seeds ...string) {
 			go c.Traverse()
 		}
 	}
+
 }
 
 // Traverse starts crawl proccess until all links have been crawled.
@@ -123,9 +124,9 @@ func (c *Crawler) Traverse() {
 			}
 		}    
 	}
-    
-    if c.queue.Len() <= 0 && c.queue.Threads() == 0 {
-        close(c.queue.Free)
+
+    if c.queue.Threads() == 0 {
+        c.queue.Close()
     }
 }
 
