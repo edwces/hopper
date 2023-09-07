@@ -14,6 +14,7 @@ type Response struct {
     Body io.ReadCloser
 
     Request *Request
+    Cookies []*http.Cookie
 
     Headers http.Header
     Properties map[string]any
@@ -26,6 +27,7 @@ func NewResponse(r *http.Response, prop map[string]any, req *Request) (*Response
         Request: req,
         Headers: r.Header,
         Properties: prop,
+        Cookies: r.Cookies(),
     }
 
     if !res.Valid() {

@@ -3,6 +3,7 @@ package hopper
 import (
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"time"
 )
@@ -20,6 +21,8 @@ func (c *Client) Init() {
 	if c.Client == nil {
 		c.Client = http.DefaultClient
 		c.Client.Timeout = DefaultClientTimeout
+        jar, _ := cookiejar.New(nil)
+        c.Client.Jar = jar
 	}
 
 	c.Headers = http.Header{}
