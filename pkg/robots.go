@@ -26,7 +26,7 @@ func RobotsTxt(crawler *Crawler) {
     crawler.OnRequest(func(r *Request) error {
         _, exists := rt.GetGroup(r.URL.Hostname(), r.Headers.Get("User-Agent"))
         if !exists {
-            robots, err := rt.Fetch(r.URL.Hostname())
+            robots, err := rt.Fetch(r.URL.Host)
             if err != nil {
                 return fmt.Errorf("Robots: %w", err)
             }

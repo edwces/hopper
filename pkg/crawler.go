@@ -75,19 +75,19 @@ func (c *Crawler) Init() {
 }
 
 func (c *Crawler) OnRequest(fn RequestHandler) {
-	c.onRequest = append([]RequestHandler{fn}, c.onRequest...)
+	c.onRequest = append(c.onRequest, fn)
 }
 
 func (c *Crawler) OnResponse(fn ResponseHandler) {
-	c.onResponse = append([]ResponseHandler{fn}, c.onResponse...)
+	c.onResponse = append(c.onResponse, fn)
 }
 
 func (c *Crawler) OnPush(fn PushHandler) {
-	c.onPush = append([]PushHandler{fn}, c.onPush...)
+	c.onPush = append(c.onPush, fn)
 }
 
 func (c *Crawler) OnError(fn ErrorHandler) {
-	c.onError = append([]ErrorHandler{fn}, c.onError...)
+	c.onError = append(c.onError, fn)
 }
 
 // Run is responsible for creating crawler workers.
